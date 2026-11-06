@@ -2,10 +2,27 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import PartySocket from "partysocket";
 import type { ClientMessage, HostView, PlayerView, ServerMessage } from "../shared/types";
 
-/** Where the PartyKit server lives. Same origin in production (PartyKit serves the app). */
+/**
+ * Where the PartyKit server lives. When the frontend is hosted elsewhere
+ * (e.g. Vercel), VITE_PARTYKIT_HOST is set at build time. Otherwise it is the
+ * same origin, because PartyKit serves the app itself.
+ */
+const configuredHost = (import.meta.env.VITE_PARTYKIT_HOST as string | undefined)
+  ?.trim()
+  // Tolerate a pasted URL ("https://x.partykit.dev/") as well as a bare host.
+  .replace(/^[a-z]+:\/\//i, "")
+  .replace(/\/+$/, "");
+
 export const PARTY_HOST: string =
-  import.meta.env.VITE_PARTYKIT_HOST ??
+  configuredHost ||
   (import.meta.env.DEV ? `${location.hostname}:1999` : location.host);
+
+if (!configuredHost && !import.meta.env.DEV && location.hostname.endsWith(".vercel.app")) {
+  console.error(
+    "Retrolash: VITE_PARTYKIT_HOST is not set for this build, so the game server " +
+      "cannot be reached. Set it in Vercel's environment variables and redeploy.",
+  );
+}
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ";
 

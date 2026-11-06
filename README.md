@@ -48,6 +48,17 @@ You'll get `https://retrolash.<your-github-username>.partykit.dev`. Open it on t
 
 To host the frontend elsewhere (Netlify, Vercel, GitHub Pages), build with `VITE_PARTYKIT_HOST=retrolash.<you>.partykit.dev npm run build` and deploy `dist/`. Routing uses query strings (`?host=ABCD`, `?room=ABCD`), so no SPA rewrites are needed.
 
+### Vercel (frontend) + PartyKit (game server)
+
+Vercel can't run the game server, because it needs long-lived WebSockets and per-room state. So the split is:
+
+1. Deploy the game server once: `npx partykit login`, then `npm run deploy`. Note the host it prints, e.g. `retrolash.<you>.partykit.dev`.
+2. Import the GitHub repo in Vercel. `vercel.json` sets the build (typecheck + `vite build`, output `dist`).
+3. In Vercel → Settings → Environment Variables, add `VITE_PARTYKIT_HOST` = that host (no `https://`) for **Production and Preview**.
+4. Redeploy. Vite bakes the variable in at build time, so changing it always needs a new build.
+
+Redeploy the PartyKit side (`npm run deploy`) whenever `party/` or `shared/` changes. Vercel only rebuilds the frontend.
+
 ## Architecture
 
 ```

@@ -1,8 +1,13 @@
 // Fill a room with bot players for testing without a pile of phones.
 //   node scripts/bots.mjs ABCD 4 [host:port]
+//   node scripts/bots.mjs ABCD 4 retrolash.<you>.partykit.dev   (deployed server)
 // Bots answer and vote randomly. Ctrl+C to stop.
 
-const [code = "TEST", countArg = "4", host = "localhost:1999"] = process.argv.slice(2);
+const [code = "TEST", countArg = "4", hostArg = "localhost:1999"] = process.argv.slice(2);
+const host = hostArg.replace(/^[a-z]+:\/\//i, "").replace(/\/+$/, "");
+// Plain ws for local/LAN dev servers, TLS for anything deployed.
+const isLocal = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
+const scheme = isLocal ? "ws" : "wss";
 const count = Number(countArg);
 const NAMES = ["Ada", "Linus", "Grace", "Ken", "Barbara", "Dennis", "Margaret", "Alan"];
 const QUIPS = [
@@ -15,7 +20,7 @@ const delay = () => 300 + Math.random() * 1500;
 
 for (let i = 0; i < count; i++) {
   const id = `bot-${code}-${i}`;
-  const ws = new WebSocket(`ws://${host}/parties/main/${code.toLowerCase()}?_pk=${id}`);
+  const ws = new WebSocket(`${scheme}://${host}/parties/main/${code.toLowerCase()}?_pk=${id}`);
   const send = (m) => ws.readyState === 1 && ws.send(JSON.stringify(m));
   let lastKey = "";
   ws.onopen = () => send({ t: "helloPlayer", name: `${NAMES[i % NAMES.length]} 🤖` });
