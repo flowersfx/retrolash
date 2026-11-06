@@ -1,11 +1,11 @@
 # Retrolash real-device test plan
 
-Goal: confirm v0.1 works on real phones and a real meeting-room screen, over the deployed setup (Vercel frontend + PartyKit game server), before using it in an actual retro.
+Goal: confirm v0.1 works on real phones and a real meeting-room screen, over the deployed setup (Azure Container Apps, see `infra/README.md`), before using it in an actual retro.
 
 **Time:** ~45 min. **People:** 1 facilitator + at least 2 others on real phones (bots fill the rest).
 **Log every issue** in the table at the bottom, with device, browser, step number and a screenshot if possible.
 
-> Use made-up answers while testing. Room state is stored on PartyKit (Cloudflare), so don't type real client or project details until that's been cleared (see "Data note" below).
+> Use made-up answers while testing. Saved games sit in Azure Files for 24 h, so don't type real client or project details until that's been cleared (see "Data note" below).
 
 ---
 
@@ -13,10 +13,11 @@ Goal: confirm v0.1 works on real phones and a real meeting-room screen, over the
 
 | # | Step | Expected |
 |---|------|----------|
-| 0.1 | `npm run deploy` (PartyKit) and note the host | Prints `https://retrolash.<you>.partykit.dev` |
-| 0.2 | Vercel: `VITE_PARTYKIT_HOST` set for Production + Preview, then redeploy | Build log shows typecheck + build passing |
-| 0.3 | Open the Vercel URL on a laptop, DevTools console open | No red errors. In particular, no "VITE_PARTYKIT_HOST is not set" |
-| 0.4 | Click *Host a retro* | Lobby shows a room code + QR. Network tab shows a `wss://…partykit.dev/parties/main/<code>` socket with status 101 |
+| 0.1 | GitHub Actions run on `main` is green | Image `ghcr.io/flowersfx/retrolash:<sha>` exists and is public |
+| 0.2 | `./infra/deploy.ps1 -SubscriptionId <id>` | Prints `https://retrolash.<env>.swedencentral.azurecontainerapps.io` |
+| 0.3 | Open `<url>/healthz`, then wait 10 min and open the main URL cold | `ok`. Note the cold-start time on first load after scale-to-zero |
+| 0.4 | Open the URL on a laptop, DevTools console open | No red errors |
+| 0.5 | Click *Host a retro* | Lobby shows a room code + QR. Network tab shows a `wss://…azurecontainerapps.io/parties/main/<code>` socket with status 101 |
 
 ## 1. Devices to cover
 
@@ -37,7 +38,7 @@ Tick each one off at least once during sections 2–5:
 | 2.1 | Scan the QR with the phone's camera app | Opens the join page with the room code prefilled |
 | 2.2 | Join by typing the URL + 4-letter code by hand on another phone | Works; lowercase or extra spaces in the code are accepted |
 | 2.3 | Enter a name, including one with emoji and one that's 20+ characters | Name shows on the big screen; long names don't break the tile layout |
-| 2.4 | Fill the room with bots: `node scripts/bots.mjs ABCD 3 retrolash.<you>.partykit.dev` | Bots appear in the lobby |
+| 2.4 | Fill the room with bots: `node scripts/bots.mjs ABCD 3 <app-host-without-https>` | Bots appear in the lobby |
 | 2.5 | With 2 players, check *Start* | Disabled, with a "need 3 players" hint |
 | 2.6 | Hover a player on the big screen and kick them | They disappear from the lobby; their phone shows it was removed |
 | 2.7 | Change timers, toggle rounds, add 2 custom retro prompts, edit the Last Lash prompt | Settings stick after reloading the host page |
@@ -82,6 +83,7 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 5.7 | Close the big screen for 1 min, then reopen `/?host=ABCD` | Game kept running on the server; host page resumes |
 | 5.8 | Leave the room idle for 15 min in the lobby, then start | Still works |
 | 5.9 | Two people tap submit or vote at the same time as the timer runs out | No double counting, no stuck phase |
+| 5.10 | Leave a game in the Sprint discussion pause for 10 min with phones connected but idle | Game is still there when you press → (checks that open sockets keep the app from scaling to zero) |
 
 ## 6. Big-screen readability
 

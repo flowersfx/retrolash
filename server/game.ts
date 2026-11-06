@@ -1,4 +1,6 @@
-import type * as Party from "partykit/server";
+// Retrolash game room: the authoritative state machine for one game.
+// It knows nothing about the transport. The runtime (server/main.ts) hands it a
+// Room with connections and storage, and calls the on* hooks.
 import {
   DEFAULT_SETTINGS,
   MAX_ANSWER_LENGTH,
@@ -19,6 +21,28 @@ import {
   type SummaryRound,
 } from "../shared/types";
 import { RETRO_PROMPTS, WARMUP_PROMPTS, shuffle } from "../shared/prompts";
+
+// ---------- runtime contract ----------
+
+export interface Connection {
+  /** Stable per-device id (the client's PartySocket `id`). */
+  readonly id: string;
+  readonly state: unknown;
+  setState(state: unknown): void;
+  send(data: string): void;
+}
+
+export interface RoomStorage {
+  get<T>(key: string): Promise<T | undefined>;
+  put<T>(key: string, value: T): Promise<void>;
+}
+
+export interface Room {
+  /** Lowercase room code. */
+  readonly id: string;
+  readonly storage: RoomStorage;
+  getConnections(): Iterable<Connection>;
+}
 
 // ---------- internal state ----------
 
@@ -97,11 +121,17 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const clean = (s: unknown, max: number) =>
   typeof s === "string" ? s.replace(/\s+/g, " ").trim().slice(0, max) : "";
 
-export default class RetroServer implements Party.Server {
+export class GameRoom {
   state: GameState = freshState();
   timer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(readonly room: Party.Room) {}
+  constructor(readonly room: Room) {}
+
+  /** Stop timers before the runtime drops this room from memory. */
+  dispose() {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+  }
 
   async onStart() {
     const saved = await this.room.storage.get<GameState>("state");
@@ -115,12 +145,12 @@ export default class RetroServer implements Party.Server {
 
   // ---------- connection lifecycle ----------
 
-  onConnect(conn: Party.Connection) {
+  onConnect(conn: Connection) {
     // Role is set by the hello message; send nothing until then.
     void conn;
   }
 
-  onClose(conn: Party.Connection) {
+  onClose(conn: Connection) {
     const st = conn.state as ConnState;
     if (st?.role === "player") {
       const stillOpen = [...this.room.getConnections()].some(
@@ -133,7 +163,7 @@ export default class RetroServer implements Party.Server {
     }
   }
 
-  onMessage(raw: string | ArrayBuffer | ArrayBufferView, conn: Party.Connection) {
+  onMessage(raw: string | ArrayBuffer | ArrayBufferView, conn: Connection) {
     if (typeof raw !== "string") return;
     let msg: ClientMessage;
     try {
@@ -158,7 +188,7 @@ export default class RetroServer implements Party.Server {
 
   // ---------- player join ----------
 
-  onPlayerHello(conn: Party.Connection, rawName: string) {
+  onPlayerHello(conn: Connection, rawName: string) {
     let p = this.player(conn.id);
     if (!p) {
       const name = clean(rawName, 16);
@@ -712,7 +742,7 @@ export default class RetroServer implements Party.Server {
     return view;
   }
 
-  sendView(conn: Party.Connection) {
+  sendView(conn: Connection) {
     const st = conn.state as ConnState;
     if (!st) return;
     const view = st.role === "host" ? this.hostView() : this.playerView(conn.id);
@@ -720,7 +750,7 @@ export default class RetroServer implements Party.Server {
     conn.send(JSON.stringify(msg));
   }
 
-  error(conn: Party.Connection, message: string) {
+  error(conn: Connection, message: string) {
     const msg: ServerMessage = { t: "error", message };
     conn.send(JSON.stringify(msg));
   }

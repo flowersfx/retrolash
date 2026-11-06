@@ -25,50 +25,41 @@ npm install
 npm run dev
 ```
 
-This starts the PartyKit game server on `:1999` and Vite on `:5173`. Vite listens on your LAN, so phones on the same Wi-Fi can join via `http://<your-ip>:5173`. The QR code points there automatically when you open the host page by IP instead of `localhost`.
+This starts the game server on `:1999` (`tsx watch server/main.ts`) and Vite on `:5173`. Vite listens on your LAN, so phones on the same Wi-Fi can join via `http://<your-ip>:5173`. The QR code points there automatically when you open the host page by IP instead of `localhost`. Saved games go to `./data/` (git-ignored).
 
 To test without a pile of phones, fill a room with bots:
 
 ```bash
-node scripts/bots.mjs ABCD 4        # room code, number of bots
+node scripts/bots.mjs ABCD 4                                  # local dev server
+node scripts/bots.mjs ABCD 4 retrolash.<env>.swedencentral.azurecontainerapps.io   # deployed
 ```
 
-Type check with `npm run typecheck`.
+`npm run typecheck` type-checks everything. `npm run build` builds the client to `dist/` and bundles the server to `dist-server/main.js`; `npm start` runs that build on `:1999` (or `$PORT`).
 
-## Deploy
+## Deploy (Azure Container Apps)
 
-PartyKit hosts both the game server and the built static site on one URL:
+One container serves both the web app and the game server, on one URL. It scales to zero when nobody is playing, so the expected cost for a few retros a month is close to zero. See [infra/README.md](infra/README.md) for the full setup, costs and how GitHub Actions rolls out new versions.
 
-```bash
-npx partykit login     # once, GitHub login
-npm run deploy         # vite build + partykit deploy
-```
+Short version:
 
-You'll get `https://retrolash.<your-github-username>.partykit.dev`. Open it on the meeting-room screen and you're done.
-
-To host the frontend elsewhere (Netlify, Vercel, GitHub Pages), build with `VITE_PARTYKIT_HOST=retrolash.<you>.partykit.dev npm run build` and deploy `dist/`. Routing uses query strings (`?host=ABCD`, `?room=ABCD`), so no SPA rewrites are needed.
-
-### Vercel (frontend) + PartyKit (game server)
-
-Vercel can't run the game server, because it needs long-lived WebSockets and per-room state. So the split is:
-
-1. Deploy the game server once: `npx partykit login`, then `npm run deploy`. Note the host it prints, e.g. `retrolash.<you>.partykit.dev`.
-2. Import the GitHub repo in Vercel. `vercel.json` sets the build (typecheck + `vite build`, output `dist`).
-3. In Vercel → Settings → Environment Variables, add `VITE_PARTYKIT_HOST` = that host (no `https://`) for **Production and Preview**.
-4. Redeploy. Vite bakes the variable in at build time, so changing it always needs a new build.
-
-Redeploy the PartyKit side (`npm run deploy`) whenever `party/` or `shared/` changes. Vercel only rebuilds the frontend.
+1. Push to `main`. GitHub Actions builds `ghcr.io/flowersfx/retrolash` and pushes it to GitHub's container registry.
+2. Once: `./infra/deploy.ps1 -SubscriptionId <id>` creates the Azure resources (shows a what-if preview first).
+3. Optional, once: `./infra/setup-github-oidc.ps1 -SubscriptionId <id>` lets every push to `main` roll out automatically.
 
 ## Architecture
 
 ```
-party/server.ts     Authoritative game state machine (one PartyKit room per game)
+server/game.ts      Authoritative game state machine (one GameRoom per game); transport-agnostic
+server/main.ts      Node runtime: static files, WebSockets (/parties/main/<room>), file-backed state
 shared/types.ts     Wire protocol + settings shared by server and client
 shared/prompts.ts   Prompt library (warm-up + retro)
 src/Host.tsx        Big-screen view
 src/Play.tsx        Phone controller
-src/net.ts          PartySocket hook, countdown, room codes
+src/net.ts          PartySocket (reconnecting WebSocket) hook, countdown, room codes
 scripts/bots.mjs    Bot players for testing
+infra/              Bicep template + deploy scripts for Azure Container Apps
 ```
 
-The server holds all state and sends each connection its own view. The host sees the matchup; a phone sees only its own prompts and ballots. State is persisted to room storage, so a reload of the big screen or a phone resumes where it was. Phones keep their identity per browser tab.
+The server holds all state and sends each connection its own view. The host sees the matchup; a phone sees only its own prompts and ballots. State is saved to disk after every change (Azure Files in production), so a reload of the big screen or a phone, or a server restart, resumes where it was. Saved games are deleted after 24 hours. Phones keep their identity per browser tab.
+
+The server runs as a single instance by design: rooms live in memory. That comfortably handles a handful of simultaneous retros.
