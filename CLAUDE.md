@@ -29,7 +29,7 @@ Quiplash-style party game for Scrum retrospectives. The big meeting-room screen 
 - v0.1 works end to end. It has been tested with bots and headless screenshots of the host and phone views.
 - v0.2 moved from PartyKit to the Node server + Azure Container Apps. Verified locally: full bot game, and a hard server kill mid-round resumes from saved state. Real-device test plan: `TEST_PLAN.md`
 - Deployed 2026-11-09 to `rg-retrolash` (Sweden Central, MSDN subscription in a non-Valtech tenant): https://retrolash.redwave-9c864cfa.swedencentral.azurecontainerapps.io. Verified: full bot game over wss, saved games land in the Azure Files share, cold start ~40 s. GitHub OIDC auto-deploy not set up yet (rollouts are manual `az containerapp update`)
-- Not yet verified on real phones or a real meeting-room screen.
+- 2026-11-09: first real test run on the Azure deployment with 4 human players on phones. Worked end to end; the user wants to make it more interesting next (no specifics yet).
 - Display font (Bricolage Grotesque via Google Fonts) hasn't been seen rendered yet.
 
 ## Ideas not yet built
