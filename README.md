@@ -4,19 +4,36 @@ A Quiplash-style party game for Scrum retrospectives. The meeting-room screen ho
 
 ## How a game runs
 
-1. **Lobby.** The host opens the site on the big screen and clicks *Host a retro*. Players scan the QR code (or enter the 4-letter room code) and type a name. You need at least 3 players.
-2. **Warm-up.** This is a pure-fun icebreaker round. Each player gets two silly prompts. Every prompt goes to two players, and their answers go head-to-head on the big screen while everyone else votes.
-3. **The Sprint.** Same format, but with retro prompts ("The thing that slowed us down the most", "If this sprint was a movie…"). After each matchup the game pauses so the team can talk about it. The facilitator advances when ready.
-4. **Last Lash: Action Items.** Everyone answers the same prompt (default: *"One concrete thing we should change next sprint"*), with up to 2 ideas each. Everyone then gets 3 votes, and the ranked list becomes your action items.
-5. **Summary.** Action items, every sprint answer with its vote count, and the scores. Use *Copy as Markdown* to paste it into Confluence, Jira, or Slack, or *Download .md*.
+1. **Lobby.** The host opens the site on the big screen and clicks *Host a retro*. Players scan the QR code (or enter the 4-letter room code) and type a name. You need at least 3 players. The lobby shows tonight's line-up of rounds.
+2. **Check-in.** Everyone picks a sprint "weather" (☀️ to ⛈️) on their phone. The big screen shows the spread, never who picked what.
+3. **Did we do it?** Only when you paste last retro's action items in the lobby settings. Everyone marks each item ✅ done, 🟡 partly or ❌ not done.
+4. **Warm-up.** A pure-fun icebreaker. Each player gets two silly prompts. Every prompt goes to two players, and their answers go head-to-head on the big screen while everyone else votes.
+5. **Emoji Only.** Same format, but answers are emoji only.
+6. **The Sprint.** Head-to-head with retro prompts ("The thing that slowed us down the most", "If this sprint was a movie…"). It's played over at least two rounds (three with only three players), and later rounds score more. After each matchup there's a discussion pause with a talking point and a 60-second timer.
+7. **Last Lash: Action Items.** Everyone answers the same prompt (default: *"One concrete thing we should change next sprint"*), with up to 2 ideas each, then gets 3 votes. On the results screen people tap **I'll take it** on their phone to own an item.
+8. **Summary.** Action items with owners, the sprint weather, the follow-up results, every sprint answer with its votes, and the scores. *Copy as Markdown* pastes into Confluence, Jira or Slack; *Download .md* saves it. Next time, paste that Markdown into the lobby to run *Did we do it?*.
 
-As in Quiplash, answers are anonymous while people vote. After the vote, the screen shows who wrote what and who voted for which answer. You can switch on **Anonymous mode** in the lobby to hide authors, voters, and scores entirely.
+Everything up to the Last Lash results moves on by itself on timers, so the game keeps going even if the facilitator gets pulled into the discussion. The Last Lash results and the summary wait for the facilitator.
+
+As in Quiplash, answers are anonymous while people vote. After the vote, the screen shows who wrote what, and the voters' avatars fly onto the answer they picked. You can switch on **Anonymous mode** in the lobby to hide authors, voters and scores entirely. Owners of action items are always shown, because volunteering is a deliberate choice.
+
+### Audience
+
+Someone dropping in mid-retro (a PO, a manager) can tap **Join as audience** on their phone. The audience votes in the head-to-heads and the Last Lash, reacts, and can volunteer to own an action item, but doesn't write answers, score, or take part in the check-in. When all players have voted, the audience gets a few more seconds before the vote closes. Up to 40 audience members; full players are capped at 16.
+
+### On the big screen
+
+- Cards fly in, votes land one by one as the voters' avatars, the scores count up, and the Last Lash results reveal from the bottom up with a drumroll.
+- Sound effects are generated in the browser. Toggle them with the speaker button in the header. Browsers only allow sound after the first click or key press on the page.
+- Players can tap emoji reactions on their phone while they wait. The reactions float up on the big screen.
+- A 🆘 *Help me* button on the phone fills in a ready-made silly answer when someone is stuck.
 
 ### Facilitator controls (big screen)
 
-- **Space** or **→** advances or skips the timer, presenter-clicker style.
-- In the lobby you can pick rounds, change timers, change the final-round prompt, and add **your own retro prompts**, one per line. Your own prompts are used first in *The Sprint*.
-- Hover over a player in the lobby to kick them.
+- **Space**, **→** or **Page Down** advances or skips the timer, presenter-clicker style.
+- **P** holds the timer (for a longer discussion) and resumes it.
+- In the lobby you can pick rounds, the number of Sprint rounds, the discussion time (or *Wait for me* to advance by hand), timers and the final-round prompt. You can also add **your own retro prompts**, one per line, which are used first in *The Sprint*, and paste **last retro's action items**.
+- Hover over a player in the lobby to remove them. Audience members can be removed at any time.
 
 ## Development
 
@@ -31,10 +48,11 @@ To test without a pile of phones, fill a room with bots:
 
 ```bash
 node scripts/bots.mjs ABCD 4                                  # local dev server
+node scripts/bots.mjs ABCD 4 localhost:1999 1                 # plus 1 audience bot
 node scripts/bots.mjs ABCD 4 retrolash.<env>.swedencentral.azurecontainerapps.io   # deployed
 ```
 
-`npm run typecheck` type-checks everything. `npm run build` builds the client to `dist/` and bundles the server to `dist-server/main.js`; `npm start` runs that build on `:1999` (or `$PORT`).
+`npm run typecheck` type-checks everything. `npm test` runs the helper self-tests and a full end-to-end bot game (`scripts/e2e.mjs`, fast timers via `TIME_SCALE`), which also runs in CI. `npm run build` builds the client to `dist/` and bundles the server to `dist-server/main.js`; `npm start` runs that build on `:1999` (or `$PORT`).
 
 ## Deploy (Azure Container Apps)
 

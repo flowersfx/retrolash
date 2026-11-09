@@ -46,9 +46,12 @@ function deviceId(code: string) {
 
 type View = HostView | PlayerView;
 
+export type RoomEvent = Exclude<ServerMessage, { t: "view" } | { t: "error" }>;
+
 export function useRoom<V extends View>(
   code: string | null,
   hello: ClientMessage | null,
+  onEvent?: (e: RoomEvent) => void,
 ) {
   const [view, setView] = useState<V | null>(null);
   const [receivedAt, setReceivedAt] = useState(0);
@@ -57,6 +60,8 @@ export function useRoom<V extends View>(
   const socketRef = useRef<PartySocket | null>(null);
   const helloRef = useRef(hello);
   helloRef.current = hello;
+  const eventRef = useRef(onEvent);
+  eventRef.current = onEvent;
   const helloKey = hello ? JSON.stringify(hello) : null;
 
   useEffect(() => {
@@ -80,6 +85,8 @@ export function useRoom<V extends View>(
         setError(null);
       } else if (msg.t === "error") {
         setError(msg.message);
+      } else {
+        eventRef.current?.(msg);
       }
     };
     ws.addEventListener("open", onOpen);

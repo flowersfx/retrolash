@@ -20,6 +20,8 @@ const ROOM_TTL_HOURS = Number(process.env.ROOM_TTL_HOURS ?? 24);
 /** Drop a room from memory after this long with nobody connected. */
 const IDLE_EVICT_MS = 30 * 60_000;
 const MAX_ROOMS = 200;
+/** Test hook: 0.1 makes every game timer 10x faster. */
+const TIME_SCALE = Number(process.env.TIME_SCALE ?? 1) || 1;
 const STATIC_DIR =
   process.env.STATIC_DIR ??
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
@@ -142,7 +144,7 @@ class RoomHost implements Room {
 
   constructor(readonly id: string) {
     this.storage = new FileStorage(path.join(DATA_DIR, `${id}.json`));
-    this.game = new GameRoom(this);
+    this.game = new GameRoom(this, TIME_SCALE);
     this.ready = this.game.onStart();
     this.queue = this.ready.catch((err) => log(`room ${id} failed to start`, err));
   }

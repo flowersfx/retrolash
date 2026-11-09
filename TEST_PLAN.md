@@ -1,6 +1,6 @@
 # Retrolash real-device test plan
 
-Goal: confirm v0.1 works on real phones and a real meeting-room screen, over the deployed setup (Azure Container Apps, see `infra/README.md`), before using it in an actual retro.
+Goal: confirm Retrolash works on real phones and a real meeting-room screen, over the deployed setup (Azure Container Apps, see `infra/README.md`), before using it in an actual retro.
 
 **Time:** ~45 min. **People:** 1 facilitator + at least 2 others on real phones (bots fill the rest).
 **Log every issue** in the table at the bottom, with device, browser, step number and a screenshot if possible.
@@ -104,6 +104,23 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 7.2 | Time one round with 10+ players | Note how long voting takes. This decides whether "fewer prompts for big teams" is needed next |
 
 ---
+
+## 8. v0.3 features
+
+| # | Step | Expected |
+|---|------|----------|
+| 8.1 | Lobby: paste the previous retro's Markdown export into *Last retro's action items* | "n found" appears; line-up shows *Did we do it?* after Check-in |
+| 8.2 | Check-in on phones | Big screen shows the weather chart; nobody's pick is identifiable |
+| 8.3 | Emoji Only: try typing letters | Letters are dropped; only emoji get through |
+| 8.4 | Tap 🆘 *Help me* | A ready-made answer is filled in and can still be edited |
+| 8.5 | 4 players | Line-up has *The Sprint · part 1* and *part 2* |
+| 8.6 | Don't touch the laptop from Start until Last Lash results | Everything advances by itself; Sprint pauses count down from 60 s |
+| 8.7 | Press **P** during a Sprint discussion, wait, press **P** again | Timer shows ⏸ and freezes, then continues |
+| 8.8 | Someone joins mid-game with *Join as audience* | They can vote right away; their vote shows as 🍿 on the card; they're not on the scoreboard; the vote closes a few seconds after the players are done |
+| 8.9 | Tap reactions on phones during results | Emoji float up on the big screen (with avatar unless Anonymous mode) |
+| 8.10 | Sound | Speaker button shows 🔊 after the first click; intro sting, whooshes, vote blips, fanfare play; mute works |
+| 8.11 | Last Lash results: tap *I'll take it* on a phone | Owner chip appears next to the item on the big screen, and in the Markdown export |
+| 8.12 | Reveal timing at the back of the room | Votes landing one by one is readable, not too slow; note if it drags with 10+ voters |
 
 ## Known gaps to check while testing
 
