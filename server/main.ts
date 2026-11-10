@@ -33,8 +33,8 @@ const speech = new AzureSpeech({
   region: process.env.SPEECH_REGION,
   key: process.env.SPEECH_KEY,
   voices: {
-    en: process.env.SPEECH_VOICE_EN ?? "en-US-GuyNeural",
-    sv: process.env.SPEECH_VOICE_SV ?? "sv-SE-MattiasNeural",
+    en: process.env.SPEECH_VOICE_EN ?? "en-US-JennyNeural",
+    sv: process.env.SPEECH_VOICE_SV ?? "sv-SE-SofieNeural",
   },
   fake: process.env.TTS_FAKE === "1",
   log: (...args) => log(...args),

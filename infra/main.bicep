@@ -27,8 +27,8 @@ param roomTtlHours int = 24
 param speechResourceId string = ''
 
 @description('Neural voices for the two languages.')
-param speechVoiceEn string = 'en-US-GuyNeural'
-param speechVoiceSv string = 'sv-SE-MattiasNeural'
+param speechVoiceEn string = 'en-US-JennyNeural'
+param speechVoiceSv string = 'sv-SE-SofieNeural'
 
 var name = 'retrolash'
 var storageName = take('retrolash${uniqueString(resourceGroup().id)}', 24)

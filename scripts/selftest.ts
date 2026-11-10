@@ -55,7 +55,7 @@ assert.equal(titledPlan(["retro", "retro"], "sv")[1].title, "Sprinten · del 2")
 // Speech cache (fake backend): queue, readiness, duration, and only our own files are served.
 const speech = new AzureSpeech({
   dir: mkdtempSync(path.join(tmpdir(), "retrolash-tts-")),
-  voices: { en: "en-US-GuyNeural", sv: "sv-SE-MattiasNeural" },
+  voices: { en: "en-US-JennyNeural", sv: "sv-SE-SofieNeural" },
   fake: true,
   log: () => {},
 });
