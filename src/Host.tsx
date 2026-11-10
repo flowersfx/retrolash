@@ -15,6 +15,7 @@ import {
   getVolume,
   musicEnabled,
   setVolume,
+  sayClips,
   onSoundChange,
   setMusicEnabled,
   setMusicMood,
@@ -157,6 +158,13 @@ export default function Host({ code }: { code: string }) {
   }, [exiting]);
 
   usePhaseSounds(shown, seconds);
+
+  // Spoken prompts: play this screen's clips once, when the screen appears.
+  const sayKey = shown?.say?.length ? `${stageKey(shown)}:${shown.phase}:${shown.say.map((c) => c.id).join(",")}` : "";
+  useEffect(() => {
+    if (sayKey && shown?.say) void sayClips(shown.say.map((c) => c.url));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sayKey]);
   useMusicMood(shown);
 
   if (!view || !shown) {
@@ -366,6 +374,7 @@ function Stage({ view, send, msLeft }: { view: HostView; send: Send; msLeft: num
           number={view.matchupNumber!}
           count={view.matchupCount!}
           msLeft={msLeft}
+          spoken={!!view.say?.length}
         />
       ) : null;
     case "pollResult":
@@ -510,7 +519,7 @@ function Lobby({ view, send }: { view: HostView; send: Send }) {
         {audience.length > 0 && <AudienceRow audience={audience} send={send} />}
 
         <PlanPreview plan={view.plan} />
-        <SettingsPanel settings={view.settings} players={connectedCount} send={send} />
+        <SettingsPanel settings={view.settings} players={connectedCount} send={send} speechAvailable={view.speechAvailable} />
 
         <div className="start-row">
           <button className="btn big" disabled={!canStart} onClick={() => send({ t: "start" })}>
@@ -574,7 +583,17 @@ function PlanPreview({ plan }: { plan: HostView["plan"] }) {
   );
 }
 
-function SettingsPanel({ settings, players, send }: { settings: Settings; players: number; send: Send }) {
+function SettingsPanel({
+  settings,
+  players,
+  send,
+  speechAvailable,
+}: {
+  settings: Settings;
+  players: number;
+  send: Send;
+  speechAvailable: boolean;
+}) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState(settings.customPrompts.join("\n"));
@@ -598,6 +617,12 @@ function SettingsPanel({ settings, players, send }: { settings: Settings; player
             <b>{t.settings.anonymous}</b>: {t.settings.anonymousHint}
           </span>
         </label>
+        {speechAvailable && (
+          <label className="toggle">
+            <input type="checkbox" checked={settings.speech} onChange={(e) => update({ speech: e.target.checked })} />
+            <span>{t.settings.speech}</span>
+          </label>
+        )}
         <div className="seg" role="group" aria-label={t.settings.language}>
           {LANGS.map((l) => (
             <button key={l} className={settings.lang === l ? "on" : ""} onClick={() => update({ lang: l })}>
@@ -748,7 +773,7 @@ function VolumePanel({ music, on }: { music: boolean; on: boolean }) {
     window.addEventListener("pointerdown", close);
     return () => window.removeEventListener("pointerdown", close);
   }, [open]);
-  const slider = (kind: "music" | "sfx", label: string, disabled = false) => (
+  const slider = (kind: "music" | "sfx" | "voice", label: string, disabled = false) => (
     <label className={`vol-row ${disabled ? "dim" : ""}`}>
       <span>{label}</span>
       <input
@@ -782,6 +807,7 @@ function VolumePanel({ music, on }: { music: boolean; on: boolean }) {
           </label>
           {slider("music", t.host.music, !music)}
           {slider("sfx", t.host.effects)}
+          {slider("voice", t.host.voice)}
           {!on && <p className="muted small-print">🔇 {t.host.soundOff}</p>}
         </div>
       )}
@@ -935,12 +961,24 @@ function Typewriter({ text, delay, ms }: { text: string; delay: number; ms: numb
 }
 
 /** Anticipation before a matchup: the number slams in, the prompt types out, a fuse burns. */
-function MatchupIntro({ m, number, count, msLeft }: { m: MatchupView; number: number; count: number; msLeft: number | null }) {
+function MatchupIntro({
+  m,
+  number,
+  count,
+  msLeft,
+  spoken,
+}: {
+  m: MatchupView;
+  number: number;
+  count: number;
+  msLeft: number | null;
+  spoken: boolean;
+}) {
   const t = useT();
   const [ms] = useState(() => Math.max(1200, msLeft ?? 3600));
   useEffect(() => {
     sfx.boom(0.05);
-    sfx.riser(Math.max(0.8, ms / 1000 - 0.9), 0.6);
+    if (!spoken) sfx.riser(Math.max(0.8, ms / 1000 - 0.9), 0.6);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [m.id]);
   return (
@@ -979,6 +1017,7 @@ function Matchup({
   number,
   count,
   msLeft,
+  spoken,
 }: {
   m: MatchupView;
   kind?: RoundKind;
@@ -986,6 +1025,7 @@ function Matchup({
   number: number;
   count: number;
   msLeft: number | null;
+  spoken: boolean;
 }) {
   const t = useT();
   const P = usePrompts();
@@ -1035,7 +1075,7 @@ function Matchup({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reveal, m.id, orderKey]);
 
-  if (phase === "matchupIntro") return <MatchupIntro m={m} number={number} count={count} msLeft={msLeft} />;
+  if (phase === "matchupIntro") return <MatchupIntro m={m} number={number} count={count} msLeft={msLeft} spoken={spoken} />;
 
   const final = reveal && step > order.length;
   const extras = reveal && step > order.length + 1;

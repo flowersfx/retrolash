@@ -3,6 +3,7 @@
 // (audience) presses "next" where the game waits for one (Last Lash results),
 // so this also checks the VIP remote and that everything else advances by itself.
 // The game runs in Swedish with the Sailboat pack, so translations and packs are exercised.
+// Speech runs against a fake backend (TTS_FAKE=1): intros must carry clips the server serves.
 //
 //   npm run build && node scripts/e2e.mjs [en|sv]
 import { spawn } from "node:child_process";
@@ -19,7 +20,7 @@ const fail = (msg) => {
 };
 
 const server = spawn(process.execPath, ["dist-server/main.js"], {
-  env: { ...process.env, PORT: String(PORT), TIME_SCALE: "0.1", DATA_DIR: mkdtempSync(path.join(tmpdir(), "retrolash-e2e-")) },
+  env: { ...process.env, PORT: String(PORT), TIME_SCALE: "0.1", TTS_FAKE: "1", DATA_DIR: mkdtempSync(path.join(tmpdir(), "retrolash-e2e-")) },
   stdio: ["ignore", "ignore", "inherit"],
 });
 const bots = () =>
@@ -74,6 +75,8 @@ ws.onopen = () => {
 };
 let last = "";
 let lashTitle = "";
+const spokenPhases = new Set();
+let clipUrl = null;
 ws.onmessage = (e) => {
   const msg = JSON.parse(e.data);
   if (msg.t !== "view") return;
@@ -96,11 +99,15 @@ ws.onmessage = (e) => {
       vipSend({ t: "start" });
     }
   }
+  if (v.say?.length) {
+    spokenPhases.add(v.phase);
+    clipUrl ??= v.say[0].url;
+  }
   if (v.phase === "lashResult") lashTitle = v.roundTitle;
-  if (v.phase === "summary") check(v);
+  if (v.phase === "summary") void check(v);
 };
 
-function check(v) {
+async function check(v) {
   if (!started) fail("game never started (VIP start didn't work?)");
   if (vipPresses !== 1) fail(`expected the VIP to press next once, got ${vipPresses}`);
   for (const p of ["matchupIntro", "podium"]) if (!phases.includes(p)) fail(`never saw phase ${p}`);
@@ -127,6 +134,15 @@ function check(v) {
   console.log(`owners: ${owners.map((o) => o.name).join(", ") || "(none volunteered)"}`);
   if (v.players.some((p) => p.audience && p.score !== 0)) fail("audience scored points");
   if (v.players.some((p) => !p.color)) fail("a player has no plate colour");
+  for (const p of ["roundIntro", "matchupIntro"]) if (!spokenPhases.has(p)) fail(`no spoken clip during ${p}`);
+  const base = `http://localhost:${PORT}`;
+  const clip = await fetch(base + clipUrl);
+  if (clip.status !== 200 || clip.headers.get("content-type") !== "audio/mpeg") fail(`clip ${clipUrl} not served: ${clip.status}`);
+  for (const bad of ["/tts/lib/" + "0".repeat(32) + ".mp3", "/tts/../package.json", "/tts/room/x.mp3"]) {
+    const r = await fetch(base + bad);
+    if (r.status !== 404) fail(`${bad} should be 404, got ${r.status}`);
+  }
+  console.log(`speech: clips on ${[...spokenPhases].join(", ")}`);
   console.log(`\nE2E OK (${LANG}) in ${((Date.now() - t0) / 1000).toFixed(1)}s: ${phases.length} screens, ${vipPresses} VIP press, ${sprints} Sprint rounds, ${kudos.length} kudos`);
   process.exit(0);
 }

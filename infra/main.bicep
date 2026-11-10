@@ -3,6 +3,9 @@
 //   - Container Apps environment (Consumption workload profile, no Log Analytics)
 //   - Storage account + Azure Files share, mounted at /data for saved games
 //   - The container app itself: 0..1 replicas, external HTTPS ingress
+// Optional: spoken prompts via a shared lab Azure AI Speech resource in another
+// resource group (infra/lab/speech.bicep). Its key goes straight into a
+// Container Apps secret here, so it never has to be handled by hand.
 //
 // Preview:  az deployment group what-if  -g <rg> --subscription <sub> -f infra/main.bicep
 // Deploy:   az deployment group create   -g <rg> --subscription <sub> -f infra/main.bicep
@@ -20,10 +23,36 @@ param minReplicas int = 0
 @description('Saved games older than this many hours are deleted.')
 param roomTtlHours int = 24
 
+@description('Resource id of a shared Azure AI Speech account for spoken prompts. Empty = no speech.')
+param speechResourceId string = ''
+
+@description('Neural voices for the two languages.')
+param speechVoiceEn string = 'en-US-GuyNeural'
+param speechVoiceSv string = 'sv-SE-MattiasNeural'
+
 var name = 'retrolash'
 var storageName = take('retrolash${uniqueString(resourceGroup().id)}', 24)
 var shareName = 'data'
 var envStorageName = 'gamedata'
+var useSpeech = !empty(speechResourceId)
+
+// The shared Speech account lives in its own resource group (see infra/lab).
+resource speech 'Microsoft.CognitiveServices/accounts@2023-05-01' existing = if (useSpeech) {
+  name: useSpeech ? last(split(speechResourceId, '/')) : 'none'
+  scope: resourceGroup(useSpeech ? split(speechResourceId, '/')[4] : resourceGroup().name)
+}
+
+var baseEnv = [
+  { name: 'ROOM_TTL_HOURS', value: string(roomTtlHours) }
+]
+var speechEnv = useSpeech
+  ? [
+      { name: 'SPEECH_REGION', value: speech!.location }
+      { name: 'SPEECH_KEY', secretRef: 'speech-key' }
+      { name: 'SPEECH_VOICE_EN', value: speechVoiceEn }
+      { name: 'SPEECH_VOICE_SV', value: speechVoiceSv }
+    ]
+  : []
 
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageName
@@ -86,6 +115,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
     workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
+      secrets: useSpeech ? [{ name: 'speech-key', value: speech!.listKeys().key1 }] : []
       ingress: {
         external: true
         targetPort: 8080
@@ -102,9 +132,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json('0.25')
             memory: '0.5Gi'
           }
-          env: [
-            { name: 'ROOM_TTL_HOURS', value: string(roomTtlHours) }
-          ]
+          env: concat(baseEnv, speechEnv)
           volumeMounts: [
             { volumeName: 'data', mountPath: '/data' }
           ]
@@ -148,3 +176,4 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
 
 output url string = 'https://${app.properties.configuration.ingress.fqdn}'
 output appName string = app.name
+output speech bool = useSpeech

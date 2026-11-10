@@ -142,6 +142,17 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 9.14 | Sprint format: pick Sailboat (or 4Ls etc.) | Intro says "Format: Sailboat ⛵"; Sprint prompts come from that pack |
 | 9.15 | Language: Svenska | Big screen, phones, prompts, round titles and Markdown export are Swedish. Paste a Swedish export into *Last retro's action items*: items are found |
 
+## 10. Spoken prompts (needs the shared Speech resource)
+
+| # | Step | Expected |
+|---|------|----------|
+| 10.1 | Lobby | *🗣️ Read prompts aloud* toggle is visible and on |
+| 10.2 | Round intro and matchup intro | Title and prompt are read aloud after the first click on the page; music ducks under the voice; intro lasts until the voice is done |
+| 10.3 | Svenska | Swedish voice, natural pronunciation of the Swedish prompts |
+| 10.4 | A custom Sprint prompt | Is read aloud too (it is generated during the answering phase) |
+| 10.5 | 🎵 panel → Voice to 0, or toggle off in the lobby | Silent intros, normal timing |
+| 10.6 | Second game with the same prompts | Starts speaking without delay (cached) |
+
 ## Known gaps to check while testing
 
 - Phone identity is per browser tab (sessionStorage). Closing the tab means rejoining as someone new (5.4).

@@ -9,6 +9,7 @@ let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let sfxBus: GainNode | null = null;
 let musicBus: GainNode | null = null;
+let voiceBus: GainNode | null = null;
 let noiseBuf: AudioBuffer | null = null;
 
 function readFlag(key: string, fallback: boolean) {
@@ -39,7 +40,12 @@ function readVolume(key: string, fallback: number) {
 let enabled = readFlag(KEY, true);
 let musicOn = readFlag(MUSIC_KEY, true);
 /** User volume per channel, 0..1. */
-const volume = { music: readVolume("retrolash:vol:music", 0.6), sfx: readVolume("retrolash:vol:sfx", 1) };
+const volume = {
+  music: readVolume("retrolash:vol:music", 0.6),
+  sfx: readVolume("retrolash:vol:sfx", 1),
+  voice: readVolume("retrolash:vol:voice", 1),
+};
+type Channel = keyof typeof volume;
 const listeners = new Set<() => void>();
 
 function audio(): AudioContext | null {
@@ -54,6 +60,9 @@ function audio(): AudioContext | null {
     sfxBus = ctx.createGain();
     sfxBus.gain.value = volume.sfx;
     sfxBus.connect(master);
+    voiceBus = ctx.createGain();
+    voiceBus.gain.value = volume.voice;
+    voiceBus.connect(master);
     musicBus = ctx.createGain();
     musicBus.gain.value = 0;
     musicBus.connect(master);
@@ -287,11 +296,11 @@ function musicLevel() {
   return level * volume.music;
 }
 
-export function getVolume(kind: "music" | "sfx") {
+export function getVolume(kind: Channel) {
   return volume[kind];
 }
 
-export function setVolume(kind: "music" | "sfx", v: number) {
+export function setVolume(kind: Channel, v: number) {
   volume[kind] = Math.min(1, Math.max(0, v));
   try {
     localStorage.setItem(`retrolash:vol:${kind}`, String(volume[kind]));
@@ -299,6 +308,64 @@ export function setVolume(kind: "music" | "sfx", v: number) {
     /* private mode */
   }
   if (ctx && kind === "sfx" && sfxBus) sfxBus.gain.setTargetAtTime(volume.sfx, ctx.currentTime, 0.05);
+  if (ctx && kind === "voice" && voiceBus) voiceBus.gain.setTargetAtTime(volume.voice, ctx.currentTime, 0.05);
   if (ctx && kind === "music" && musicBus && musicTimer) musicBus.gain.setTargetAtTime(musicLevel(), ctx.currentTime, 0.1);
   listeners.forEach((l) => l());
+}
+
+// ---------- spoken prompts ----------
+// Clips come from the game server (/tts/...). They play through their own
+// channel, and the music ducks underneath while someone is talking.
+
+const clipCache = new Map<string, Promise<AudioBuffer | null>>();
+let voiceToken = 0;
+let voiceSource: AudioBufferSourceNode | null = null;
+
+function loadClip(url: string): Promise<AudioBuffer | null> {
+  let p = clipCache.get(url);
+  if (!p) {
+    p = fetch(url)
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+      .then((buf) => audio()?.decodeAudioData(buf) ?? null)
+      .catch(() => {
+        clipCache.delete(url);
+        return null;
+      });
+    clipCache.set(url, p);
+  }
+  return p;
+}
+
+/** Say these clips in order. A new call interrupts the previous one. */
+export async function sayClips(urls: string[]) {
+  const c = audio();
+  if (!c || !voiceBus || volume.voice === 0 || urls.length === 0) return;
+  stopVoice();
+  const token = voiceToken;
+  for (const url of urls) {
+    const buf = await loadClip(url);
+    if (token !== voiceToken) return;
+    if (!buf) continue;
+    duck(buf.duration + 0.6);
+    await new Promise<void>((resolve) => {
+      const src = c.createBufferSource();
+      src.buffer = buf;
+      src.connect(voiceBus!);
+      src.onended = () => resolve();
+      voiceSource = src;
+      src.start();
+    });
+    if (token !== voiceToken) return;
+  }
+  voiceSource = null;
+}
+
+export function stopVoice() {
+  voiceToken++;
+  try {
+    voiceSource?.stop();
+  } catch {
+    /* already stopped */
+  }
+  voiceSource = null;
 }

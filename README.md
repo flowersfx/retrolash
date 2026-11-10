@@ -33,6 +33,7 @@ Someone dropping in mid-retro (a PO, a manager) can tap **Join as audience** on 
 - Win streaks ("Hat trick!"), comebacks from last place and lead changes get called out.
 - The Last Lash results reveal from the bottom up with a drumroll.
 - A small QR code in the header lets latecomers join mid-game.
+- **Spoken prompts:** with Azure AI Speech set up (see [infra/README.md](infra/README.md)), the big screen reads round titles and prompts aloud in English or Swedish, and the intros stretch to fit. Toggle it in the lobby; the 🎵 panel has a voice volume. Without Speech the game simply runs silent.
 - Sound effects and a background music loop are generated in the browser. 🔊 mutes everything; 🎵 opens music on/off and separate volume sliders for music and sound effects (remembered in the browser). Browsers only allow sound after the first click or key press on the page.
 - Players can tap emoji reactions on their phone while they wait. The reactions float up on the big screen.
 - A 🆘 *Help me* button on the phone fills in a ready-made silly answer when someone is stuck.

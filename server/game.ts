@@ -38,10 +38,12 @@ import {
   type RoundKind,
   type ServerMessage,
   type Settings,
+  type SpokenClip,
+  type Lang,
   type SummaryRound,
   type VoterView,
 } from "../shared/types";
-import { strings, titledPlan } from "../shared/i18n";
+import { roundTitle, strings, titledPlan } from "../shared/i18n";
 import { prompts, shuffle, sprintPrompts } from "../shared/prompts";
 
 // ---------- runtime contract ----------
@@ -57,6 +59,25 @@ export interface Connection {
 export interface RoomStorage {
   get<T>(key: string): Promise<T | undefined>;
   put<T>(key: string, value: T): Promise<void>;
+}
+
+/** A line the big screen could say out loud. */
+export interface SpeechLine {
+  text: string;
+  lang: Lang;
+  /** lib: built-in text, cached for good. room: facilitator/player text, deleted with saved games. */
+  scope: "lib" | "room";
+}
+
+export type SpeechClip = SpokenClip;
+
+/** Text to speech (server/tts.ts). Optional: without it the game is silent. */
+export interface Speech {
+  readonly enabled: boolean;
+  /** Start generating these in the background. */
+  prefetch(lines: SpeechLine[]): void;
+  /** The clip if it is ready now, else null (and it gets queued). Never blocks. */
+  get(line: SpeechLine): SpeechClip | null;
 }
 
 export interface Room {
@@ -130,6 +151,8 @@ interface GameState {
   /** Who led after the last round, and who just took over. */
   leaderId: string | null;
   leadChange: string | null;
+  /** Clips for the current screen, fixed when the phase starts. */
+  say: SpeechClip[] | null;
 }
 
 type ConnState = { role: "host" } | { role: "player" } | undefined;
@@ -178,6 +201,7 @@ function freshState(settings: Settings = DEFAULT_SETTINGS): GameState {
     streaks: {},
     leaderId: null,
     leadChange: null,
+    say: null,
   };
 }
 
@@ -195,7 +219,19 @@ export class GameRoom {
   constructor(
     readonly room: Room,
     private readonly timeScale = 1,
+    private readonly speech?: Speech,
   ) {}
+
+  /** Generate the round titles in both languages once, so even the first intro can speak. */
+  static warmSpeech(speech: Speech) {
+    if (!speech.enabled) return;
+    const lines: SpeechLine[] = [];
+    for (const lang of LANGS)
+      for (const kind of [...TOGGLEABLE_ROUNDS, "followup" as const])
+        for (let total = 1; total <= 3; total++)
+          for (let i = 0; i < total; i++) lines.push({ text: roundTitle(kind, i, total, lang), lang, scope: "lib" });
+    speech.prefetch(lines);
+  }
 
   /** Stop timers before the runtime drops this room from memory. */
   dispose() {
@@ -408,6 +444,10 @@ export class GameRoom {
         s.leaderId = null;
         s.leadChange = null;
         s.players.forEach((p) => (p.score = 0));
+        this.speech?.prefetch([
+          ...titledPlan(plan, s.settings.lang).map((r) => this.line(r.title)),
+          this.line(s.settings.lashPrompt),
+        ]);
         this.startRound();
         break;
       }
@@ -578,7 +618,7 @@ export class GameRoom {
         : {}),
     };
     s.matchupIndex = 0;
-    this.setPhase("roundIntro", INTRO_MS);
+    this.spokenPhase("roundIntro", INTRO_MS, [this.line(s.rounds[s.roundIndex].title)], 1500);
   }
 
   beginAnswering() {
@@ -595,6 +635,8 @@ export class GameRoom {
         answers: [null, null],
         votes: {},
       }));
+      // Audio for every prompt is made while people write (~90 s), well before each intro.
+      this.speech?.prefetch(round.matchups.map((m) => this.line(m.prompt)));
     }
     const ms =
       round.kind === "checkin"
@@ -604,6 +646,7 @@ export class GameRoom {
           : round.kind === "kudos"
             ? KUDOS_ANSWER_MS
             : this.state.settings.answerSeconds * 1000;
+    if (round.kind === "lastlash") return this.spokenPhase("answering", ms, [this.line(round.lashPrompt ?? "")], 0);
     this.setPhase("answering", ms);
   }
 
@@ -642,7 +685,9 @@ export class GameRoom {
       s.matchupIndex++;
     }
     if (s.matchupIndex >= round.matchups.length) return this.endRound();
-    this.setPhase("matchupIntro", MATCHUP_INTRO_MS);
+    // To read answers aloud later: prefetch them in endAnswering, and give the
+    // voting phase its own spokenPhase with the two answers.
+    this.spokenPhase("matchupIntro", MATCHUP_INTRO_MS, [this.line(round.matchups[s.matchupIndex].prompt)], 1000);
   }
 
   startVoting() {
@@ -796,8 +841,9 @@ export class GameRoom {
     this.advance();
   }
 
-  setPhase(phase: Phase, durationMs: number | null) {
+  setPhase(phase: Phase, durationMs: number | null, say: SpeechClip[] | null = null) {
     this.state.phase = phase;
+    this.state.say = say;
     this.state.deadline = durationMs === null ? null : Date.now() + durationMs * this.timeScale;
     this.state.pausedMs = null;
     this.armTimer();
@@ -817,6 +863,27 @@ export class GameRoom {
       },
       Math.max(0, deadline - Date.now()),
     );
+  }
+
+  /**
+   * Start a phase that speaks. Clips are used only if they are all ready now, and
+   * the phase stretches to fit them (plus pad). Otherwise it runs silent, on time.
+   */
+  spokenPhase(phase: Phase, baseMs: number, lines: SpeechLine[], padMs: number) {
+    const clips = this.clips(lines);
+    const spoken = clips ? clips.reduce((a, c) => a + c.ms, 0) + padMs : 0;
+    this.setPhase(phase, Math.max(baseMs, spoken), clips);
+  }
+
+  clips(lines: SpeechLine[]): SpeechClip[] | null {
+    if (!this.speech?.enabled || !this.state.settings.speech) return null;
+    const clips = lines.filter((l) => l.text.trim()).map((l) => this.speech!.get(l));
+    return clips.length && clips.every((c) => c) ? (clips as SpeechClip[]) : null;
+  }
+
+  /** A line in the room language; built-in text is cached for good, the rest per room. */
+  line(text: string): SpeechLine {
+    return { text, lang: this.state.settings.lang, scope: isLibraryText(text) ? "lib" : "room" };
   }
 
   // ---------- helpers ----------
@@ -1062,6 +1129,8 @@ export class GameRoom {
       pausedMs: s.pausedMs,
       doneIds: this.doneIds(),
       expectedIds: this.expectedIds(),
+      speechAvailable: !!this.speech?.enabled,
+      ...(s.say?.length ? { say: s.say } : {}),
     };
     if (round && ["matchupIntro", "voting", "matchupResult"].includes(s.phase)) {
       const m = round.matchups[s.matchupIndex];
@@ -1224,6 +1293,23 @@ export class GameRoom {
   }
 }
 
+let library: Set<string> | null = null;
+/** Built-in prompts and titles: safe to cache for good and share between rooms. */
+function isLibraryText(text: string) {
+  if (!library) {
+    const set = new Set<string>(Object.values(DEFAULT_LASH_PROMPT));
+    for (const lang of LANGS) {
+      const p = prompts(lang);
+      for (const list of [p.warmup, p.retro, p.emoji, ...Object.values(p.packs)]) list.forEach((x) => set.add(x));
+      for (const kind of [...TOGGLEABLE_ROUNDS, "followup" as const])
+        for (let total = 1; total <= 3; total++)
+          for (let i = 0; i < total; i++) set.add(roundTitle(kind, i, total, lang));
+    }
+    library = set;
+  }
+  return library.has(text);
+}
+
 /** How a closed matchup went for one phone: as an author, or as a voter. */
 function myResult(m: Matchup | undefined, id: string, anon: boolean): MyResult | null {
   if (!m?.closed) return null;
@@ -1276,5 +1362,6 @@ function sanitizeSettings(s: Settings): Settings {
     previousItems: list(s.previousItems, MAX_PREVIOUS_ITEMS, MAX_LASH_LENGTH),
     lang,
     pack: PACKS.includes(s.pack) ? s.pack : DEFAULT_SETTINGS.pack,
+    speech: s.speech !== false,
   };
 }

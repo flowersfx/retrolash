@@ -47,6 +47,8 @@ export interface Settings {
   lang: Lang;
   /** Which prompt pack The Sprint uses. */
   pack: PackId;
+  /** Read round titles and prompts aloud on the big screen (when the server has speech). */
+  speech: boolean;
 }
 
 export const DEFAULT_LASH_PROMPT: Record<Lang, string> = {
@@ -68,6 +70,7 @@ export const DEFAULT_SETTINGS: Settings = {
   previousItems: [],
   lang: "en",
   pack: "mix",
+  speech: true,
 };
 
 /** How many Sprint rounds "auto" gives: at least two, three for tiny teams. */
@@ -249,7 +252,18 @@ export interface HostView {
   kudos?: KudosView[];
   /** roundResult: someone new is in first place. */
   leadChange?: string;
+  /** The server can synthesise speech (shows the lobby toggle). */
+  speechAvailable: boolean;
+  /** Clips the big screen should play for this screen, in order. */
+  say?: SpokenClip[];
   summary?: SummaryRound[];
+}
+
+/** A synthesised line, served by the game server. */
+export interface SpokenClip {
+  id: string;
+  url: string;
+  ms: number;
 }
 
 export interface PromptTask {

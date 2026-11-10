@@ -57,6 +57,7 @@ const en = {
     volume: "Music and volume",
     music: "Music",
     effects: "Sound effects",
+    voice: "Voice",
   },
   blurbs: {
     checkin: "Quick weather report: how did this sprint feel? Pick one on your phone. It's anonymous.",
@@ -84,6 +85,7 @@ const en = {
   settings: {
     anonymous: "Anonymous mode",
     anonymousHint: "hide authors and scores",
+    speech: "🗣️ Read prompts aloud",
     more: "More settings",
     hide: "Hide settings",
     language: "Language",
@@ -297,6 +299,7 @@ const sv: Strings = {
     volume: "Musik och volym",
     music: "Musik",
     effects: "Ljudeffekter",
+    voice: "Röst",
   },
   blurbs: {
     checkin: "Snabb väderrapport: hur kändes sprinten? Välj på telefonen. Det är anonymt.",
@@ -324,6 +327,7 @@ const sv: Strings = {
   settings: {
     anonymous: "Anonymt läge",
     anonymousHint: "dölj vem som skrev och poängen",
+    speech: "🗣️ Läs upp frågorna",
     more: "Fler inställningar",
     hide: "Dölj inställningar",
     language: "Språk",

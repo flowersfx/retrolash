@@ -10,6 +10,8 @@ All in one resource group (default `rg-retrolash`, Sweden Central):
 | Container app `retrolash`: 0.25 vCPU / 0.5 GiB, 0–1 replicas | Web app + game server. Scales to zero when idle. | Likely $0: the monthly free allowance per subscription (180,000 vCPU-s, 360,000 GiB-s, 2M requests) is ~200 h of running time at this size |
 | Storage account (Standard LRS) + 1 GiB Azure Files share | Saved games, so restarts resume | Cents per month |
 
+Optional, in a separate shared resource group (`rg-lab-shared`): an Azure AI Speech account (free F0) for spoken prompts, shared with other lab prototypes. See step 4.
+
 The image comes from GitHub Container Registry (`ghcr.io/flowersfx/retrolash`), which is free for public packages. No Azure Container Registry is needed.
 
 Prices and SLAs change. Check the [Container Apps pricing page](https://azure.microsoft.com/pricing/details/container-apps/) and the Azure SLA documents before quoting them to anyone.
@@ -44,7 +46,23 @@ It prints the app URL at the end (`https://retrolash.<something>.swedencentral.a
 
 Options: `-MinReplicas 1` keeps it always warm (no cold start, costs more), `-Location westeurope`, `-ResourceGroup <name>`.
 
-### 4. Optional: automatic rollouts from GitHub
+### 4. Optional: spoken prompts (shared lab Speech)
+
+The big screen can read round titles and prompts aloud with Azure AI Speech neural voices. The Speech resource is **shared by lab prototypes** in this subscription, so it lives in its own resource group (`rg-lab-shared`), not in `rg-retrolash`:
+
+```powershell
+./infra/lab/deploy-speech.ps1 -SubscriptionId <id> -PreviewOnly   # what-if only
+./infra/lab/deploy-speech.ps1 -SubscriptionId <id>                # registers the provider, creates rg-lab-shared + speech-lab-<suffix>
+./infra/deploy.ps1 -SubscriptionId <id>                           # finds it and wires it into Retrolash
+```
+
+- **Tier:** free (F0): 0.5 M neural characters a month, with request-rate limits, **shared by every app** that uses it. A subscription can only have one F0 Speech resource. Use `-Sku S0` for pay-as-you-go. Check the [pricing page](https://azure.microsoft.com/pricing/details/cognitive-services/speech-services/) first.
+- **Key handling:** `infra/main.bicep` reads the key with `listKeys()` at deploy time and stores it as the Container Apps secret `speech-key`. Nobody copies it by hand, and it never appears in the repo or in GitHub. Rotating the key (`az cognitiveservices account keys regenerate`) breaks every app until each one is redeployed. Moving consumers to managed identity + the *Cognitive Services Speech User* role is the cleaner next step; the account already has the custom subdomain that needs.
+- **Caching:** clips are generated on demand and stored in the Azure Files share (`/data/tts`). Built-in prompts are kept for good; custom prompts are deleted with the saved games (24 h).
+- **Data:** the text of custom prompts is sent to Azure Speech in this subscription.
+- **Without it:** `./infra/deploy.ps1 -NoSpeech`, or simply don't create the shared resource. The game runs silent and the lobby hides the toggle.
+
+### 5. Optional: automatic rollouts from GitHub
 
 ```powershell
 ./infra/setup-github-oidc.ps1 -SubscriptionId <id>

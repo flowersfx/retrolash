@@ -9,6 +9,10 @@
 .EXAMPLE
   ./infra/deploy.ps1 -SubscriptionId <guid>              # preview, then confirm
   ./infra/deploy.ps1 -SubscriptionId <guid> -PreviewOnly # what-if only
+  ./infra/deploy.ps1 -SubscriptionId <guid> -NoSpeech    # without spoken prompts
+
+  Spoken prompts use the shared lab Speech resource (infra/lab/deploy-speech.ps1)
+  if one exists in -SpeechResourceGroup.
 #>
 param(
   [Parameter(Mandatory)] [string] $SubscriptionId,
@@ -16,6 +20,8 @@ param(
   [string] $Location = 'swedencentral',
   [string] $Image = 'ghcr.io/flowersfx/retrolash:latest',
   [ValidateSet(0, 1)] [int] $MinReplicas = 0,
+  [string] $SpeechResourceGroup = 'rg-lab-shared',
+  [switch] $NoSpeech,
   [switch] $PreviewOnly
 )
 
@@ -44,7 +50,18 @@ if (-not $rgExists) {
   Invoke-Az group create --name $ResourceGroup --location $Location --subscription $SubscriptionId --tags app=retrolash -o none
 }
 
-$params = @("image=$Image", "minReplicas=$MinReplicas")
+$speechId = ''
+if (-not $NoSpeech) {
+  $hasRg = (Invoke-Az group exists --name $SpeechResourceGroup --subscription $SubscriptionId) -eq 'true'
+  if ($hasRg) {
+    $speechId = Invoke-Az cognitiveservices account list -g $SpeechResourceGroup --subscription $SubscriptionId `
+      --query "[?kind=='SpeechServices'] | [0].id" -o tsv
+  }
+}
+Write-Host "Speech       : $(if ($speechId) { $speechId.Split('/')[-1] } else { 'off' })"
+Write-Host ''
+
+$params = @("image=$Image", "minReplicas=$MinReplicas", "speechResourceId=$speechId")
 
 Write-Host '--- What-if preview ---'
 Invoke-Az deployment group what-if --resource-group $ResourceGroup --subscription $SubscriptionId `

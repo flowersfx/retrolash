@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import { GameRoom, type Connection, type Room, type RoomStorage } from "./game";
+import { AzureSpeech } from "./tts";
 
 const PORT = Number(process.env.PORT ?? 1999);
 const DATA_DIR = process.env.DATA_DIR ?? path.resolve("data");
@@ -25,6 +26,19 @@ const TIME_SCALE = Number(process.env.TIME_SCALE ?? 1) || 1;
 const STATIC_DIR =
   process.env.STATIC_DIR ??
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
+
+// Spoken prompts (optional). The key comes from a Container Apps secret.
+const speech = new AzureSpeech({
+  dir: path.join(DATA_DIR, "tts"),
+  region: process.env.SPEECH_REGION,
+  key: process.env.SPEECH_KEY,
+  voices: {
+    en: process.env.SPEECH_VOICE_EN ?? "en-US-GuyNeural",
+    sv: process.env.SPEECH_VOICE_SV ?? "sv-SE-MattiasNeural",
+  },
+  fake: process.env.TTS_FAKE === "1",
+  log: (...args) => log(...args),
+});
 
 const ROOM_PATH = /^\/parties\/main\/([a-z]{4})\/?$/;
 const DEVICE_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -144,7 +158,7 @@ class RoomHost implements Room {
 
   constructor(readonly id: string) {
     this.storage = new FileStorage(path.join(DATA_DIR, `${id}.json`));
-    this.game = new GameRoom(this, TIME_SCALE);
+    this.game = new GameRoom(this, TIME_SCALE, speech);
     this.ready = this.game.onStart();
     this.queue = this.ready.catch((err) => log(`room ${id} failed to start`, err));
   }
@@ -235,6 +249,25 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse) {
     res.writeHead(400, SECURITY_HEADERS).end();
     return;
   }
+  // Spoken-prompt clips: only ones the server made (see server/tts.ts).
+  if (rel.startsWith("/tts/")) {
+    const clip = speech.file(rel);
+    const info = clip && (await stat(clip.file).catch(() => null));
+    if (!clip || !info?.isFile()) {
+      res.writeHead(404, SECURITY_HEADERS).end();
+      return;
+    }
+    res.writeHead(200, {
+      "Content-Type": "audio/mpeg",
+      "Content-Length": info.size,
+      // Content-addressed, so it never changes. Room clips may hold retro content: keep them private.
+      "Cache-Control": clip.scope === "lib" ? "public, max-age=31536000, immutable" : "private, max-age=86400",
+      ...SECURITY_HEADERS,
+    });
+    if (req.method === "HEAD") res.end();
+    else createReadStream(clip.file).pipe(res);
+    return;
+  }
   if (rel.endsWith("/")) rel += "index.html";
   const file = path.resolve(STATIC_DIR, "." + rel);
   if (!file.startsWith(STATIC_DIR + path.sep)) {
@@ -306,7 +339,10 @@ const heartbeat = setInterval(() => {
   }
 }, 25_000);
 
-const sweeper = setInterval(() => void sweepOldGames(), 3_600_000);
+const sweeper = setInterval(() => {
+  void sweepOldGames();
+  void speech.sweep(ROOM_TTL_HOURS * 3_600_000);
+}, 3_600_000);
 
 async function shutdown(signal: string) {
   log(`${signal}: saving ${rooms.size} room(s) and shutting down`);
@@ -322,4 +358,7 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 
 await initStorage();
 await sweepOldGames();
+if (persist) await speech.init().catch((err) => log("speech: cache init failed", err));
+await speech.sweep(ROOM_TTL_HOURS * 3_600_000);
+GameRoom.warmSpeech(speech);
 http.listen(PORT, () => log(`retrolash listening on :${PORT}, static from ${STATIC_DIR}`));

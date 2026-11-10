@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import { DEFAULT_SETTINGS, PACKS, emojiOnly, parsePreviousItems, planRounds } from "../shared/types";
 import { prompts, sprintPrompts } from "../shared/prompts";
 import { titledPlan } from "../shared/i18n";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { AzureSpeech } from "../server/tts";
 
 const md = `# Retro 2026-11-09
 
@@ -48,4 +52,23 @@ for (const lang of ["en", "sv"] as const) {
 }
 for (const pack of PACKS) assert.equal(sprintPrompts("en", pack).length, sprintPrompts("sv", pack).length);
 assert.equal(titledPlan(["retro", "retro"], "sv")[1].title, "Sprinten · del 2");
+// Speech cache (fake backend): queue, readiness, duration, and only our own files are served.
+const speech = new AzureSpeech({
+  dir: mkdtempSync(path.join(tmpdir(), "retrolash-tts-")),
+  voices: { en: "en-US-GuyNeural", sv: "sv-SE-MattiasNeural" },
+  fake: true,
+  log: () => {},
+});
+await speech.init();
+const line = { text: "The worst possible commit message", lang: "en" as const, scope: "lib" as const };
+assert.equal(speech.get(line), null, "not ready before it is generated");
+await new Promise((r) => setTimeout(r, 200));
+const clip = speech.get(line)!;
+assert.ok(clip && /^\/tts\/lib\/[a-f0-9]{32}\.mp3$/.test(clip.url), "clip url");
+assert.ok(Math.abs(clip.ms - line.text.length * 70) < 5, `duration from size: ${clip.ms}`);
+assert.equal(speech.id(line), speech.id({ ...line }), "stable ids");
+assert.notEqual(speech.id(line), speech.id({ ...line, lang: "sv" }), "voice is part of the id");
+assert.ok(speech.file(clip.url), "serves its own clip");
+assert.equal(speech.file("/tts/lib/" + "a".repeat(32) + ".mp3"), null, "unknown clip");
+assert.equal(speech.file("/tts/lib/../../etc/passwd"), null, "traversal");
 console.log("selftest OK");
