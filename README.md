@@ -84,6 +84,10 @@ Short version:
 
 ## Architecture
 
+![Retrolash on Azure](docs/architecture.svg)
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the decisions behind it.
+
 ```
 server/game.ts      Authoritative game state machine (one GameRoom per game); transport-agnostic
 server/main.ts      Node runtime: static files, WebSockets (/parties/main/<room>), file-backed state

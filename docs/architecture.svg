@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900" role="img" aria-label="Phones and the big screen talk to one Node container over WebSockets through the Container Apps ingress. The container saves game state and voice clips to an Azure Files share and asks a shared Azure AI Speech account for audio. GitHub Actions tests every push, publishes an image to GHCR, and the image is rolled out to the container app.">
+  <title>Retrolash on Azure</title>
+  <style>
+  text { fill: #e6ebf2; font-family: Inter, "Segoe UI", -apple-system, system-ui, sans-serif; }
+  .t { font-family: "Space Grotesk", "Segoe UI Semibold", "Segoe UI", system-ui, sans-serif; font-weight: 700; font-size: 15px; }
+  .s { fill: #8f9bb0; font-size: 12px; }
+  .m { font-family: "JetBrains Mono", "Cascadia Mono", Consolas, ui-monospace, monospace; font-size: 12px; fill: #e6ebf2; }
+  .lab { font-family: "JetBrains Mono", "Cascadia Mono", Consolas, ui-monospace, monospace; font-size: 11px; letter-spacing: 0.12em; fill: #8f9bb0; }
+  .note { fill: #8f9bb0; font-size: 11.5px; }
+  .edge-label { font-size: 11.5px; font-weight: 600; paint-order: stroke; stroke: #151b24; stroke-width: 5px; stroke-linejoin: round; }
+</style>
+  <defs>
+    <marker id="ah-game" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#f5c84c"/></marker>
+    <marker id="ah-voice" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#3ad1b5"/></marker>
+    <marker id="ah-ship" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#b597ff"/></marker>
+    <marker id="ah-muted" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#8f9bb0"/></marker>
+  </defs>
+  <rect x="0" y="0" width="1200" height="900" rx="14" fill="#151b24"/>
+
+  <!-- ===== In the room ===== -->
+  <text class="lab" x="40" y="112">IN THE ROOM</text>
+  <rect x="200" y="60" width="340" height="96" rx="12" fill="#1b2331" stroke="#2d3748"/>
+  <text class="t" x="220" y="90">Big screen</text>
+  <text class="s" x="220" y="113">Laptop on the meeting-room TV</text>
+  <text class="s" x="220" y="134">React · sound effects, music and voice</text>
+
+  <rect x="660" y="60" width="340" height="96" rx="12" fill="#1b2331" stroke="#2d3748"/>
+  <text class="t" x="680" y="90">Phones</text>
+  <text class="s" x="680" y="113">Players and audience, joined by QR code</text>
+  <text class="s" x="680" y="134">React · reconnecting WebSocket</text>
+
+  <!-- room → edge -->
+  <line x1="280" y1="158" x2="280" y2="218" stroke="#f5c84c" stroke-width="2.5" marker-start="url(#ah-game)" marker-end="url(#ah-game)"/>
+  <text class="edge-label" x="272" y="192" text-anchor="end" fill="#f5c84c">game view</text>
+  <line x1="480" y1="218" x2="480" y2="158" stroke="#3ad1b5" stroke-width="2.5" marker-end="url(#ah-voice)"/>
+  <text class="edge-label" x="488" y="192" fill="#3ad1b5">voice clips</text>
+  <line x1="830" y1="158" x2="830" y2="218" stroke="#f5c84c" stroke-width="2.5" marker-start="url(#ah-game)" marker-end="url(#ah-game)"/>
+  <text class="edge-label" x="838" y="192" fill="#f5c84c">answers and votes</text>
+
+  <!-- ===== Edge ===== -->
+  <text class="lab" x="40" y="256">EDGE</text>
+  <rect x="200" y="220" width="800" height="64" rx="12" fill="#1b2331" stroke="#2d3748"/>
+  <text class="m" x="600" y="246" text-anchor="middle">retrolash.flowersfx.com  →  CNAME  →  *.azurecontainerapps.io</text>
+  <text class="s" x="600" y="268" text-anchor="middle">Container Apps ingress · managed TLS certificate · WebSocket upgrade</text>
+
+  <!-- ===== Azure ===== -->
+  <rect x="20" y="320" width="1160" height="440" rx="16" fill="none" stroke="#4c9be8" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <text class="lab" x="40" y="346" fill="#4c9be8" style="fill:#4c9be8">AZURE · LAB SUBSCRIPTION · SWEDEN CENTRAL</text>
+
+  <!-- rg-retrolash -->
+  <rect x="40" y="366" width="780" height="378" rx="12" fill="#151b24" stroke="#2d3748"/>
+  <text class="m" x="60" y="392">rg-retrolash</text>
+
+  <rect x="60" y="406" width="740" height="196" rx="10" fill="none" stroke="#2d3748" stroke-dasharray="3 4"/>
+  <text class="s" x="80" y="430">Container Apps env · Consumption</text>
+
+  <rect x="80" y="442" width="700" height="144" rx="10" fill="#1b2331" stroke="#8f9bb0"/>
+  <text class="t" x="100" y="468">retrolash · Node 22 · 0–1 replica</text>
+
+  <rect x="100" y="480" width="210" height="90" rx="8" fill="#151b24" stroke="#2d3748"/>
+  <text class="t" x="116" y="506" style="font-size:14px">Static client</text>
+  <text class="s" x="116" y="528">Serves the built React app</text>
+  <text class="s" x="116" y="548">to screens and phones</text>
+
+  <rect x="325" y="480" width="210" height="90" rx="8" fill="#151b24" stroke="#f5c84c"/>
+  <text class="t" x="341" y="506" style="font-size:14px">Game rooms</text>
+  <text class="s" x="341" y="528">Server decides every move</text>
+  <text class="s" x="341" y="548">Each socket gets its own view</text>
+
+  <rect x="550" y="480" width="210" height="90" rx="8" fill="#151b24" stroke="#3ad1b5"/>
+  <text class="t" x="566" y="506" style="font-size:14px">Speech service</text>
+  <text class="s" x="566" y="528">Prefetch, queue, retry</text>
+  <text class="s" x="566" y="548">Serves its own clips only</text>
+
+  <!-- edge → app -->
+  <line x1="430" y1="286" x2="430" y2="478" stroke="#f5c84c" stroke-width="2.5" marker-start="url(#ah-game)" marker-end="url(#ah-game)"/>
+  <text class="edge-label" x="438" y="306" fill="#f5c84c">WebSocket per room</text>
+  <line x1="655" y1="478" x2="655" y2="286" stroke="#3ad1b5" stroke-width="2.5" marker-end="url(#ah-voice)"/>
+  <text class="edge-label" x="663" y="306" fill="#3ad1b5">GET /tts/…mp3</text>
+
+  <!-- Azure Files -->
+  <rect x="60" y="636" width="740" height="88" rx="10" fill="#1b2331" stroke="#2d3748"/>
+  <text class="t" x="80" y="660" style="font-size:14px">Azure Files share, mounted at /data</text>
+  <rect x="80" y="674" width="220" height="34" rx="7" fill="#151b24" stroke="#2d3748"/>
+  <text class="m" x="190" y="696" text-anchor="middle">rooms/*.json · 24 h</text>
+  <rect x="320" y="674" width="220" height="34" rx="7" fill="#151b24" stroke="#2d3748"/>
+  <text class="m" x="430" y="696" text-anchor="middle">tts/lib · kept</text>
+  <rect x="560" y="674" width="220" height="34" rx="7" fill="#151b24" stroke="#2d3748"/>
+  <text class="m" x="670" y="696" text-anchor="middle">tts/room · 24 h</text>
+
+  <line x1="430" y1="572" x2="430" y2="634" stroke="#8f9bb0" stroke-width="2" marker-end="url(#ah-muted)"/>
+  <text class="edge-label" x="438" y="626" fill="#8f9bb0">saves every change</text>
+  <line x1="655" y1="572" x2="655" y2="634" stroke="#8f9bb0" stroke-width="2" marker-end="url(#ah-muted)"/>
+  <text class="edge-label" x="663" y="626" fill="#8f9bb0">caches clips</text>
+
+  <!-- rg-lab-shared -->
+  <rect x="850" y="366" width="310" height="378" rx="12" fill="#151b24" stroke="#2d3748"/>
+  <text class="m" x="870" y="392">rg-lab-shared</text>
+  <rect x="870" y="420" width="270" height="124" rx="10" fill="#1b2331" stroke="#3ad1b5"/>
+  <text class="t" x="890" y="448">Azure AI Speech</text>
+  <text class="s" x="890" y="471">Free tier, shared by lab prototypes</text>
+  <text class="s" x="890" y="492">Neural voices: Sofie (sv), Jenny (en)</text>
+  <text class="m" x="890" y="520" style="font-size:11px;fill:#8f9bb0">speech-lab-…</text>
+  <text class="note" x="870" y="584">The template copies its key into the</text>
+  <text class="note" x="870" y="602">app's secret at deploy time. Nobody</text>
+  <text class="note" x="870" y="620">handles it by hand.</text>
+
+  <!-- app → speech -->
+  <line x1="762" y1="500" x2="868" y2="500" stroke="#3ad1b5" stroke-width="2.5" marker-end="url(#ah-voice)"/>
+  <text class="edge-label" x="815" y="490" text-anchor="middle" fill="#3ad1b5">SSML in, MP3 out</text>
+
+  <!-- ===== Delivery ===== -->
+  <text class="lab" x="40" y="792">DELIVERY</text>
+  <rect x="40" y="806" width="150" height="62" rx="10" fill="#1b2331" stroke="#2d3748"/>
+  <text class="t" x="56" y="832" style="font-size:14px">GitHub repo</text>
+  <text class="m" x="56" y="852" style="font-size:11px;fill:#8f9bb0">flowersfx/retrolash</text>
+
+  <rect x="215" y="806" width="250" height="62" rx="10" fill="#1b2331" stroke="#b597ff"/>
+  <text class="t" x="231" y="832" style="font-size:14px">GitHub Actions</text>
+  <text class="s" x="231" y="852">Tests + two full bot games (sv, en)</text>
+
+  <rect x="490" y="806" width="150" height="62" rx="10" fill="#1b2331" stroke="#2d3748"/>
+  <text class="t" x="506" y="832" style="font-size:14px">GHCR image</text>
+  <text class="s" x="506" y="852">Public, one per commit</text>
+
+  <rect x="665" y="806" width="180" height="62" rx="10" fill="#1b2331" stroke="#2d3748"/>
+  <text class="t" x="681" y="832" style="font-size:14px">Rollout</text>
+  <text class="s" x="681" y="852">New revision, old one drains</text>
+
+  <rect x="990" y="806" width="170" height="62" rx="10" fill="#1b2331" stroke="#2d3748"/>
+  <text class="t" x="1006" y="832" style="font-size:14px">Bicep</text>
+  <text class="s" x="1006" y="852">What-if before every change</text>
+
+  <line x1="192" y1="837" x2="213" y2="837" stroke="#b597ff" stroke-width="2.5" marker-end="url(#ah-ship)"/>
+  <line x1="467" y1="837" x2="488" y2="837" stroke="#b597ff" stroke-width="2.5" marker-end="url(#ah-ship)"/>
+  <line x1="642" y1="837" x2="663" y2="837" stroke="#b597ff" stroke-width="2.5" marker-end="url(#ah-ship)"/>
+  <polyline points="810,804 810,530 782,530" fill="none" stroke="#b597ff" stroke-width="2.5" marker-end="url(#ah-ship)"/>
+  <text class="edge-label" x="818" y="784" fill="#b597ff">new image</text>
+  <line x1="1075" y1="804" x2="1075" y2="762" stroke="#b597ff" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#ah-ship)"/>
+  <text class="edge-label" x="1083" y="788" fill="#b597ff">defines all of it</text>
+      </svg>
