@@ -3,6 +3,7 @@
 //   node scripts/bots.mjs ABCD 4 retrolash.<env>.swedencentral.azurecontainerapps.io 1
 // Bots answer, vote, react and volunteer at random. Audience bots only vote and react.
 // They reconnect if the server restarts. Ctrl+C to stop.
+// BOT_VOTE=0 makes every bot vote for the left answer (forces RETROLASH clean sweeps).
 
 const [code = "TEST", countArg = "4", hostArg = "localhost:1999", audienceArg = "0"] =
   process.argv.slice(2);
@@ -19,6 +20,9 @@ const QUIPS = [
 const EMOJI = ["🔥🐶☕", "🤡🎪", "🙈🙉🙊", "📉😬", "🐌⏳", "🚀💥", "🧯🔥"];
 const REACTIONS = ["😂", "🔥", "👏", "😮"];
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
+const AVATARS = ["🦊", "🐙", "🦉", "🐸", "🦄", "🐝", "🐳", "🦖"];
+const COLORS = ["#ffcf33", "#ff5ca8", "#3ee0c5", "#7c8cff", "#ff8a3d", "#9be15d", "#c77dff", "#4cc9f0"];
+const KUDOS = ["Thanks for the code reviews", "Saved the demo", "Best rubber duck", "Kept us calm"];
 const delay = () => 300 + Math.random() * 1500;
 
 function bot(i, audience) {
@@ -34,7 +38,7 @@ function bot(i, audience) {
   const send = (m) => ws?.readyState === 1 && ws.send(JSON.stringify(m));
   const connect = () => {
     ws = new WebSocket(`${scheme}://${host}/parties/main/${code.toLowerCase()}?_pk=${id}`);
-    ws.onopen = () => send({ t: "helloPlayer", name, audience });
+    ws.onopen = () => send({ t: "helloPlayer", name, audience, avatar: pick(AVATARS), color: pick(COLORS) });
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
       if (msg.t === "error") return console.log(`${name}: ${msg.message}`);
@@ -55,9 +59,13 @@ function bot(i, audience) {
         once(`fu:${round}`, () =>
           send({ t: "followup", answers: v.followup.items.map(() => Math.floor(Math.random() * 3)) }),
         );
+      if (v.phase === "answering" && v.kudosForm && !v.kudosForm.mine) {
+        const to = Math.random() < 0.2 ? "team" : pick(v.kudosForm.teammates).id;
+        once(`k:${round}`, () => send({ t: "kudos", to, text: pick(KUDOS) }));
+      }
       if (v.phase === "voting" && v.vote?.canVote && v.vote.myChoice === null)
         once(`v:${v.vote.matchupId}`, () =>
-          send({ t: "vote", matchupId: v.vote.matchupId, choice: Math.random() < 0.5 ? 0 : 1 }),
+          send({ t: "vote", matchupId: v.vote.matchupId, choice: process.env.BOT_VOTE ? Number(process.env.BOT_VOTE) : Math.random() < 0.5 ? 0 : 1 }),
         );
       if (v.phase === "lashVoting" && v.lashBallot && !v.lashBallot.submitted) {
         const options = v.lashBallot.answers.filter((a) => !a.mine).map((a) => a.id);

@@ -2,27 +2,36 @@
 // It knows nothing about the transport. The runtime (server/main.ts) hands it a
 // Room with connections and storage, and calls the on* hooks.
 import {
+  AUDIENCE_AVATARS,
+  AVATARS,
+  DEFAULT_LASH_PROMPT,
   DEFAULT_SETTINGS,
   FOLLOWUP_OPTIONS,
+  KUDOS_TEAM,
+  LANGS,
   MAX_ANSWER_LENGTH,
   MAX_AUDIENCE,
   MAX_EMOJI_LENGTH,
+  MAX_KUDOS_LENGTH,
   MAX_LASH_LENGTH,
   MAX_PLAYERS,
   MAX_PREVIOUS_ITEMS,
   MIN_PLAYERS,
   MOODS,
+  PACKS,
+  PLATE_COLORS,
   REACTIONS,
   TOGGLEABLE_ROUNDS,
   emojiOnly,
   isHeadToHead,
   planRounds,
-  titledPlan,
   type ClientMessage,
   type FollowupItemView,
   type HostView,
+  type KudosView,
   type LashAnswerView,
   type MatchupView,
+  type MyResult,
   type Phase,
   type PlayerView,
   type PublicPlayer,
@@ -30,8 +39,10 @@ import {
   type ServerMessage,
   type Settings,
   type SummaryRound,
+  type VoterView,
 } from "../shared/types";
-import { EMOJI_PROMPTS, RETRO_PROMPTS, WARMUP_PROMPTS, shuffle } from "../shared/prompts";
+import { strings, titledPlan } from "../shared/i18n";
+import { prompts, shuffle, sprintPrompts } from "../shared/prompts";
 
 // ---------- runtime contract ----------
 
@@ -68,6 +79,7 @@ interface Matchup {
   points?: [number, number];
   unanimous?: boolean;
   closed?: boolean;
+  callout?: MatchupView["callout"];
 }
 
 interface LashAnswer {
@@ -94,6 +106,10 @@ interface Round {
   /** Follow-up: last retro's items, and each player's answers. */
   followupItems?: string[];
   followupBallots?: Record<string, (number | null)[]>;
+  /** Kudos: author id → recipient id (or KUDOS_TEAM) and message. */
+  kudos?: Record<string, { to: string; text: string }>;
+  /** Kudos authors in reveal order (shuffled, so order says nothing). */
+  kudosOrder?: string[];
 }
 
 interface GameState {
@@ -109,23 +125,25 @@ interface GameState {
   /** Remaining time while the facilitator holds the timer. */
   pausedMs: number | null;
   usedPrompts: string[];
+  /** Head-to-head wins in a row, per player. */
+  streaks: Record<string, number>;
+  /** Who led after the last round, and who just took over. */
+  leaderId: string | null;
+  leadChange: string | null;
 }
 
 type ConnState = { role: "host" } | { role: "player" } | undefined;
 
-const AVATARS = [
-  "🦊", "🐙", "🦉", "🐸", "🦄", "🐝", "🐳", "🦖", "🐧", "🦔", "🐢", "🦩",
-  "🐼", "🦁", "🐌", "🦦", "🐨", "🦜", "🐞", "🦀",
-];
-const AUDIENCE_AVATARS = ["🍿", "🎩", "🕶️", "🧐", "🤠", "👽", "🤖", "🧙"];
-
 const INTRO_MS = 5000;
-const QUICK_RESULT_MS = 8000; // warm-up / emoji matchup results
+const MATCHUP_INTRO_MS = 3600;
+const QUICK_RESULT_MS = 9000; // warm-up / emoji matchup results
 const ROUND_RESULT_MS = 10000;
 const CHECKIN_ANSWER_MS = 30000;
 const FOLLOWUP_ANSWER_MS = 60000;
+const KUDOS_ANSWER_MS = 60000;
 const CHECKIN_RESULT_MS = 12000;
 const FOLLOWUP_RESULT_MIN_MS = 20000;
+const PODIUM_MS = 15000;
 /** When all players are done but the audience isn't, give them this long. */
 const AUDIENCE_GRACE_MS = 5000;
 const REACTION_GAP_MS = 500;
@@ -157,6 +175,9 @@ function freshState(settings: Settings = DEFAULT_SETTINGS): GameState {
     deadline: null,
     pausedMs: null,
     usedPrompts: [],
+    streaks: {},
+    leaderId: null,
+    leadChange: null,
   };
 }
 
@@ -188,10 +209,18 @@ export class GameRoom {
       // Fill in fields that older saved games don't have.
       this.state = { ...freshState(), ...saved };
       this.state.settings = sanitizeSettings({ ...DEFAULT_SETTINGS, ...saved.settings });
-      // Nobody is connected right after a restart.
-      this.state.players.forEach((p) => (p.connected = false));
+      this.state.players.forEach((p, i) => {
+        // Nobody is connected right after a restart.
+        p.connected = false;
+        p.color ??= PLATE_COLORS[i % PLATE_COLORS.length];
+      });
       this.armTimer();
     }
+  }
+
+  /** Screen texts in the room's language. */
+  t() {
+    return strings(this.state.settings.lang);
   }
 
   // ---------- connection lifecycle ----------
@@ -230,7 +259,7 @@ export class GameRoom {
         this.sendView(conn);
         return;
       case "helloPlayer":
-        return this.onPlayerHello(conn, msg.name, !!msg.audience);
+        return this.onPlayerHello(conn, msg);
       case "react":
         if (role === "player") this.onReaction(conn.id, msg.emoji);
         return;
@@ -242,18 +271,19 @@ export class GameRoom {
 
   // ---------- player join ----------
 
-  onPlayerHello(conn: Connection, rawName: string, audience: boolean) {
+  onPlayerHello(conn: Connection, msg: Extract<ClientMessage, { t: "helloPlayer" }>) {
+    const t = this.t();
     let p = this.player(conn.id);
     if (!p) {
-      const name = clean(rawName, 16);
-      if (!name) return this.error(conn, "Please enter a name.");
+      const audience = !!msg.audience;
+      const name = clean(msg.name, 16);
+      if (!name) return this.error(conn, t.errors.name);
       if (audience) {
         if (this.state.players.filter((x) => x.audience).length >= MAX_AUDIENCE)
-          return this.error(conn, "The audience is full.");
+          return this.error(conn, t.errors.audienceFull);
       } else if (this.state.players.filter((x) => !x.audience).length >= MAX_PLAYERS) {
-        return this.error(conn, "This game is full. You can still join as audience.");
+        return this.error(conn, t.errors.gameFull);
       }
-      const avatar = audience ? this.audienceAvatar() : this.playerAvatar();
       let finalName = name;
       let n = 2;
       while (
@@ -261,7 +291,14 @@ export class GameRoom {
       ) {
         finalName = `${name} ${n++}`;
       }
-      p = { id: conn.id, name: finalName, avatar, connected: true, score: 0 };
+      p = {
+        id: conn.id,
+        name: finalName,
+        avatar: this.chooseAvatar(msg.avatar, audience, conn.id),
+        color: this.chooseColor(msg.color),
+        connected: true,
+        score: 0,
+      };
       if (audience) p.audience = true;
       this.state.players.push(p);
     }
@@ -270,9 +307,23 @@ export class GameRoom {
     this.commit();
   }
 
-  playerAvatar() {
-    const used = new Set(this.state.players.map((x) => x.avatar));
-    return AVATARS.find((a) => !used.has(a)) ?? AVATARS[this.state.players.length % AVATARS.length];
+  /** The wanted avatar if it's valid and free, otherwise a free one. */
+  chooseAvatar(wanted: unknown, audience: boolean, selfId: string) {
+    const valid =
+      typeof wanted === "string" && (AVATARS.includes(wanted) || AUDIENCE_AVATARS.includes(wanted));
+    if (audience) return valid ? (wanted as string) : this.audienceAvatar();
+    const taken = new Set(
+      this.state.players.filter((x) => !x.audience && x.id !== selfId).map((x) => x.avatar),
+    );
+    if (valid && !taken.has(wanted as string)) return wanted as string;
+    return AVATARS.find((a) => !taken.has(a)) ?? AVATARS[this.state.players.length % AVATARS.length];
+  }
+
+  /** The wanted plate colour if valid, otherwise the least-used one. */
+  chooseColor(wanted: unknown) {
+    if (typeof wanted === "string" && PLATE_COLORS.includes(wanted)) return wanted;
+    const uses = (c: string) => this.state.players.filter((p) => p.color === c).length;
+    return [...PLATE_COLORS].sort((a, b) => uses(a) - uses(b))[0];
   }
 
   audienceAvatar() {
@@ -300,14 +351,25 @@ export class GameRoom {
     }
   }
 
-  // ---------- host controls ----------
+  // ---------- host controls (also VIP phones, for start/next/hold) ----------
 
   onHostMessage(msg: ClientMessage) {
     const s = this.state;
     switch (msg.t) {
       case "settings": {
         if (s.phase !== "lobby") return;
-        s.settings = sanitizeSettings({ ...s.settings, ...msg.settings });
+        const prev = s.settings;
+        const next = { ...prev, ...msg.settings };
+        // Switching language swaps the final prompt too, unless it was customised.
+        if (
+          msg.settings.lang &&
+          msg.settings.lang !== prev.lang &&
+          msg.settings.lashPrompt === undefined &&
+          prev.lashPrompt === DEFAULT_LASH_PROMPT[prev.lang]
+        ) {
+          next.lashPrompt = DEFAULT_LASH_PROMPT[msg.settings.lang] ?? prev.lashPrompt;
+        }
+        s.settings = sanitizeSettings(next);
         break;
       }
       case "kick": {
@@ -318,11 +380,18 @@ export class GameRoom {
         s.players = s.players.filter((p) => p.id !== msg.playerId);
         for (const c of this.room.getConnections()) {
           if (c.id === msg.playerId) {
-            this.error(c, "You were removed from the room.");
+            this.error(c, this.t().errors.kicked);
             c.setState(undefined);
           }
         }
         this.checkAllDone();
+        break;
+      }
+      case "vip": {
+        const target = this.player(msg.playerId);
+        if (!target) return;
+        if (msg.on) target.vip = true;
+        else delete target.vip;
         break;
       }
       case "start": {
@@ -335,6 +404,9 @@ export class GameRoom {
         s.rounds = [];
         s.roundIndex = 0;
         s.usedPrompts = [];
+        s.streaks = {};
+        s.leaderId = null;
+        s.leadChange = null;
         s.players.forEach((p) => (p.score = 0));
         this.startRound();
         break;
@@ -379,7 +451,17 @@ export class GameRoom {
     if (!me) return;
     const audience = !!me.audience;
 
+    // A VIP phone is a remote control for the big screen.
+    if (me.vip && (msg.t === "start" || msg.t === "next" || msg.t === "hold")) {
+      return this.onHostMessage(msg);
+    }
+
     switch (msg.t) {
+      case "profile": {
+        me.avatar = this.chooseAvatar(msg.avatar, audience, playerId);
+        me.color = this.chooseColor(msg.color);
+        break;
+      }
       case "answer": {
         if (s.phase !== "answering" || !round || !isHeadToHead(round.kind)) return;
         const m = round.matchups.find((x) => x.id === msg.matchupId);
@@ -422,6 +504,19 @@ export class GameRoom {
           const v = raw[i];
           return Number.isInteger(v) && v! >= 0 && v! < FOLLOWUP_OPTIONS.length ? v! : null;
         });
+        break;
+      }
+      case "kudos": {
+        if (audience || s.phase !== "answering" || round?.kind !== "kudos") return;
+        const to =
+          msg.to === KUDOS_TEAM
+            ? KUDOS_TEAM
+            : typeof msg.to === "string" && msg.to !== playerId && this.player(msg.to)
+              ? msg.to
+              : null;
+        const text = clean(msg.text, MAX_KUDOS_LENGTH);
+        if (!to || !text) return;
+        (round.kudos ??= {})[playerId] = { to, text };
         break;
       }
       case "vote": {
@@ -469,7 +564,7 @@ export class GameRoom {
     const occurrence = s.plan.slice(0, s.roundIndex).filter((k) => k === kind).length;
     s.rounds[s.roundIndex] = {
       kind,
-      title: titledPlan(s.plan)[s.roundIndex].title,
+      title: titledPlan(s.plan, s.settings.lang)[s.roundIndex].title,
       multiplier: multiplier(kind, occurrence),
       matchups: [],
       lashAnswers: [],
@@ -477,6 +572,7 @@ export class GameRoom {
       lashBallots: {},
       lashPrompt: kind === "lastlash" ? s.settings.lashPrompt : undefined,
       ...(kind === "checkin" ? { moods: {} } : {}),
+      ...(kind === "kudos" ? { kudos: {} } : {}),
       ...(kind === "followup"
         ? { followupItems: [...s.settings.previousItems], followupBallots: {} }
         : {}),
@@ -505,7 +601,9 @@ export class GameRoom {
         ? CHECKIN_ANSWER_MS
         : round.kind === "followup"
           ? FOLLOWUP_ANSWER_MS
-          : this.state.settings.answerSeconds * 1000;
+          : round.kind === "kudos"
+            ? KUDOS_ANSWER_MS
+            : this.state.settings.answerSeconds * 1000;
     this.setPhase("answering", ms);
   }
 
@@ -515,6 +613,12 @@ export class GameRoom {
     if (round.kind === "followup") {
       const d = this.state.settings.discussionSeconds;
       return this.setPhase("pollResult", d === 0 ? null : Math.max(FOLLOWUP_RESULT_MIN_MS, d * 1000));
+    }
+    if (round.kind === "kudos") {
+      const order = shuffle(Object.keys(round.kudos ?? {}));
+      if (order.length === 0) return this.nextRound();
+      round.kudosOrder = order;
+      return this.setPhase("pollResult", Math.min(60000, Math.max(12000, 4000 + order.length * 3500)));
     }
     if (round.kind === "lastlash") {
       round.lashAnswers = shuffle(round.lashAnswers);
@@ -526,6 +630,7 @@ export class GameRoom {
     this.beginVoting();
   }
 
+  /** Find the next matchup worth playing and announce it. */
   beginVoting() {
     const s = this.state;
     const round = this.round()!;
@@ -537,13 +642,18 @@ export class GameRoom {
       s.matchupIndex++;
     }
     if (s.matchupIndex >= round.matchups.length) return this.endRound();
-    this.setPhase("voting", s.settings.voteSeconds * 1000);
+    this.setPhase("matchupIntro", MATCHUP_INTRO_MS);
+  }
+
+  startVoting() {
+    this.setPhase("voting", this.state.settings.voteSeconds * 1000);
     if (this.expectedIds().length === 0 && this.connectedAudience().length === 0) this.endVoting();
   }
 
   endVoting() {
+    const s = this.state;
     const round = this.round()!;
-    const m = round.matchups[this.state.matchupIndex];
+    const m = round.matchups[s.matchupIndex];
     const counts: [number, number] = [0, 0];
     Object.values(m.votes).forEach((v) => counts[v]++);
     const total = counts[0] + counts[1];
@@ -552,22 +662,44 @@ export class GameRoom {
     // An empty answer forfeits.
     if (m.answers[0] === null) points[0] = 0;
     if (m.answers[1] === null) points[1] = 0;
+    let winner: 0 | 1 | null = null;
     if (counts[0] !== counts[1]) {
-      const w = counts[0] > counts[1] ? 0 : 1;
-      const unanimous = total >= 2 && counts[1 - w] === 0;
+      winner = counts[0] > counts[1] ? 0 : 1;
+      const unanimous = total >= 2 && counts[1 - winner] === 0;
       m.unanimous = unanimous;
-      points[w] += (unanimous ? 250 : 100) * mult;
+      points[winner] += (unanimous ? 250 : 100) * mult;
     }
+    const before = new Map(s.players.map((p) => [p.id, p.score]));
     m.points = points;
     m.closed = true;
     m.playerIds.forEach((id, i) => {
       const p = this.player(id);
       if (p) p.score += points[i];
+      s.streaks[id] = winner === i ? (s.streaks[id] ?? 0) + 1 : 0;
     });
+    m.callout = this.callout(m, winner, before);
     // Sprint results pause for discussion (timed unless set to "wait for me").
-    const d = this.state.settings.discussionSeconds;
+    const d = s.settings.discussionSeconds;
     const ms = round.kind === "retro" ? (d === 0 ? null : d * 1000) : QUICK_RESULT_MS;
     this.setPhase("matchupResult", ms);
+  }
+
+  /** A hat trick (3+ wins in a row) or a climb out of last place. */
+  callout(m: Matchup, winner: 0 | 1 | null, before: Map<string, number>): MatchupView["callout"] {
+    if (winner === null || this.state.settings.anonymous) return undefined;
+    const id = m.playerIds[winner];
+    const p = this.player(id);
+    if (!p) return undefined;
+    const n = this.state.streaks[id] ?? 0;
+    if (n >= 3) return { kind: "streak", name: p.name, n };
+    const others = this.state.players.filter((x) => !x.audience && x.id !== id);
+    if (others.length >= 2) {
+      const mine = before.get(id) ?? 0;
+      const wasLast = others.every((x) => (before.get(x.id) ?? 0) > mine);
+      const nowNotLast = others.some((x) => x.score < p.score);
+      if (wasLast && nowNotLast) return { kind: "comeback", name: p.name };
+    }
+    return undefined;
   }
 
   nextMatchup() {
@@ -576,6 +708,16 @@ export class GameRoom {
   }
 
   endRound() {
+    const s = this.state;
+    s.leadChange = null;
+    if (!s.settings.anonymous) {
+      const ranked = this.ranked();
+      const top = ranked[0];
+      if (top && top.score > 0 && (ranked.length < 2 || ranked[1].score < top.score)) {
+        if (s.leaderId && s.leaderId !== top.id) s.leadChange = top.name;
+        s.leaderId = top.id;
+      }
+    }
     this.setPhase("roundResult", ROUND_RESULT_MS);
   }
 
@@ -600,7 +742,9 @@ export class GameRoom {
     const s = this.state;
     s.roundIndex++;
     if (s.roundIndex >= s.plan.length) {
-      this.setPhase("summary", null);
+      // Crown the winners first, unless there's nothing to crown.
+      const scored = !s.settings.anonymous && s.players.some((p) => !p.audience && p.score > 0);
+      this.setPhase(scored ? "podium" : "summary", scored ? PODIUM_MS : null);
     } else {
       this.startRound();
     }
@@ -613,6 +757,8 @@ export class GameRoom {
         return this.beginAnswering();
       case "answering":
         return this.endAnswering();
+      case "matchupIntro":
+        return this.startVoting();
       case "voting":
         return this.endVoting();
       case "matchupResult":
@@ -623,6 +769,8 @@ export class GameRoom {
         return this.nextRound();
       case "lashVoting":
         return this.endLashVoting();
+      case "podium":
+        return this.setPhase("summary", null);
     }
   }
 
@@ -675,13 +823,21 @@ export class GameRoom {
 
   pickPrompts(kind: RoundKind, n: number): string[] {
     const s = this.state;
+    const { lang, pack } = s.settings;
+    const set = prompts(lang);
     const used = new Set(s.usedPrompts);
     const base =
-      kind === "warmup" ? WARMUP_PROMPTS : kind === "emoji" ? EMOJI_PROMPTS : RETRO_PROMPTS;
+      kind === "warmup" ? set.warmup : kind === "emoji" ? set.emoji : sprintPrompts(lang, pack);
+    // A small pack runs out with big teams; top up from the classic mix.
+    const fallback = kind === "retro" && pack !== "mix" ? set.retro : [];
     const custom =
       kind === "retro" ? s.settings.customPrompts.filter((p) => !used.has(p)) : [];
-    let pool = [...custom, ...shuffle(base.filter((p) => !used.has(p)))];
-    if (pool.length < n) pool = [...pool, ...shuffle(base)];
+    const pool = [
+      ...custom,
+      ...shuffle(base.filter((p) => !used.has(p))),
+      ...shuffle(fallback.filter((p) => !used.has(p))),
+    ];
+    while (pool.length < n) pool.push(...shuffle(base));
     const picked = pool.slice(0, n);
     s.usedPrompts.push(...picked);
     // Custom prompts come first in the pool but shouldn't all land on the
@@ -704,6 +860,11 @@ export class GameRoom {
 
   connectedAudience() {
     return this.state.players.filter((p) => p.connected && p.audience);
+  }
+
+  /** Full players, best score first. */
+  ranked() {
+    return this.state.players.filter((p) => !p.audience).sort((a, b) => b.score - a.score);
   }
 
   isConnected(id: string) {
@@ -738,6 +899,7 @@ export class GameRoom {
     if (s.phase === "answering") {
       if (round.kind === "lastlash") return [...round.lashSubmitted];
       if (round.kind === "checkin") return Object.keys(round.moods ?? {});
+      if (round.kind === "kudos") return Object.keys(round.kudos ?? {});
       if (round.kind === "followup") {
         return Object.entries(round.followupBallots ?? {})
           .filter(([, b]) => b.every((v) => v !== null))
@@ -757,7 +919,17 @@ export class GameRoom {
   }
 
   name(id: string) {
-    return this.player(id)?.name ?? "Someone";
+    return this.player(id)?.name ?? "?";
+  }
+
+  plate(id: string): VoterView {
+    const p = this.player(id);
+    return {
+      name: p?.name ?? "?",
+      avatar: p?.avatar ?? "🙂",
+      color: p?.color ?? PLATE_COLORS[0],
+      ...(p?.audience ? { audience: true } : {}),
+    };
   }
 
   matchupView(m: Matchup, reveal: boolean): MatchupView {
@@ -769,20 +941,25 @@ export class GameRoom {
     };
     if (reveal && m.closed) {
       const counts: [number, number] = [0, 0];
-      const voters: [string[], string[]] = [[], []];
-      const avatars: [string[], string[]] = [[], []];
+      const names: [string[], string[]] = [[], []];
+      const plates: [VoterView[], VoterView[]] = [[], []];
       for (const [voter, v] of Object.entries(m.votes)) {
         counts[v]++;
-        voters[v].push(this.name(voter));
-        avatars[v].push(this.player(voter)?.avatar ?? "🙂");
+        names[v].push(this.name(voter));
+        plates[v].push(this.plate(voter));
       }
       view.votes = counts;
       view.unanimous = m.unanimous;
       if (!anon) {
         view.authors = [this.name(m.playerIds[0]), this.name(m.playerIds[1])];
-        view.voterNames = voters;
-        view.voterAvatars = avatars;
+        view.authorPlates = [
+          this.player(m.playerIds[0]) ? this.plate(m.playerIds[0]) : null,
+          this.player(m.playerIds[1]) ? this.plate(m.playerIds[1]) : null,
+        ];
+        view.voterNames = names;
+        view.voters = plates;
         view.points = m.points;
+        if (m.callout) view.callout = m.callout;
       }
     }
     return view;
@@ -797,10 +974,10 @@ export class GameRoom {
       ...(reveal && !anon ? { author: this.name(a.playerId) } : {}),
       ...(reveal && a.owners?.length
         ? {
-            owners: a.owners.map((id) => ({
-              name: this.name(id),
-              avatar: this.player(id)?.avatar ?? "🙂",
-            })),
+            owners: a.owners.map((id) => {
+              const p = this.plate(id);
+              return { name: p.name, avatar: p.avatar, color: p.color };
+            }),
           }
         : {}),
     }));
@@ -825,6 +1002,19 @@ export class GameRoom {
     });
   }
 
+  /** Kudos without their authors, in the shuffled reveal order. */
+  kudosView(round: Round): KudosView[] {
+    const order = round.kudosOrder ?? Object.keys(round.kudos ?? {});
+    return order
+      .map((author) => round.kudos?.[author])
+      .filter((k): k is { to: string; text: string } => !!k)
+      .map((k) => {
+        if (k.to === KUDOS_TEAM) return { to: null, text: k.text };
+        const p = this.plate(k.to);
+        return { to: p.name, avatar: p.avatar, color: p.color, text: k.text };
+      });
+  }
+
   summary(): SummaryRound[] {
     return this.state.rounds.map((r) => ({
       kind: r.kind,
@@ -834,6 +1024,7 @@ export class GameRoom {
       lashAnswers: r.kind === "lastlash" ? this.lashView(r, true) : undefined,
       moodCounts: r.kind === "checkin" ? this.moodCounts(r) : undefined,
       followupItems: r.kind === "followup" ? this.followupView(r) : undefined,
+      kudos: r.kind === "kudos" ? this.kudosView(r) : undefined,
     }));
   }
 
@@ -847,10 +1038,15 @@ export class GameRoom {
     return this.state.players.map((p) => ({ ...p, score: anon ? 0 : p.score }));
   }
 
+  currentPlan() {
+    const s = this.state;
+    return s.phase === "lobby" ? planRounds(s.settings, this.connectedPlayers().length) : s.plan;
+  }
+
   hostView(): HostView {
     const s = this.state;
     const round = this.round();
-    const plan = s.phase === "lobby" ? planRounds(s.settings, this.connectedPlayers().length) : s.plan;
+    const plan = this.currentPlan();
     const view: HostView = {
       role: "host",
       code: this.room.id.toUpperCase(),
@@ -861,13 +1057,13 @@ export class GameRoom {
       roundCount: plan.length,
       roundKind: round?.kind,
       roundTitle: round?.title,
-      plan: titledPlan(plan),
+      plan: titledPlan(plan, s.settings.lang),
       remainingMs: this.remainingMs(),
       pausedMs: s.pausedMs,
       doneIds: this.doneIds(),
       expectedIds: this.expectedIds(),
     };
-    if (round && (s.phase === "voting" || s.phase === "matchupResult")) {
+    if (round && ["matchupIntro", "voting", "matchupResult"].includes(s.phase)) {
       const m = round.matchups[s.matchupIndex];
       view.matchup = this.matchupView(m, s.phase === "matchupResult");
       view.matchupNumber = s.matchupIndex + 1;
@@ -881,10 +1077,12 @@ export class GameRoom {
     if (round && s.phase === "pollResult") {
       if (round.kind === "checkin") view.moodCounts = this.moodCounts(round);
       if (round.kind === "followup") view.followupItems = this.followupView(round);
+      if (round.kind === "kudos") view.kudos = this.kudosView(round);
     }
     if (round?.kind === "followup" && s.phase === "answering") {
       view.followupItems = (round.followupItems ?? []).map((text) => ({ text, counts: [] }));
     }
+    if (s.phase === "roundResult" && s.leadChange) view.leadChange = s.leadChange;
     if (s.phase === "summary") view.summary = this.summary();
     return view;
   }
@@ -893,19 +1091,48 @@ export class GameRoom {
     const s = this.state;
     const round = this.round();
     const me = this.player(id) ?? null;
+    const anon = s.settings.anonymous;
     const view: PlayerView = {
       role: "player",
       code: this.room.id.toUpperCase(),
       phase: s.phase,
-      you: me ? { ...me, score: s.settings.anonymous ? 0 : me.score } : null,
-      anonymous: s.settings.anonymous,
+      lang: s.settings.lang,
+      you: me ? { ...me, score: anon ? 0 : me.score } : null,
+      anonymous: anon,
       remainingMs: this.remainingMs(),
       roundKind: round?.kind,
       roundTitle: round?.title,
       playerCount: this.connectedPlayers().length,
       minPlayers: MIN_PLAYERS,
     };
-    if (!round || !me) return view;
+    if (!me) return view;
+
+    if (me.vip) {
+      const plan = this.currentPlan();
+      const matchPhase = ["matchupIntro", "voting", "matchupResult"].includes(s.phase);
+      view.vipControls = {
+        canStart: s.phase === "lobby" && this.connectedPlayers().length >= MIN_PLAYERS && plan.length > 0,
+        timed: s.deadline !== null,
+        paused: s.pausedMs !== null,
+        roundNumber: s.roundIndex + 1,
+        roundCount: plan.length,
+        ...(matchPhase && round
+          ? { matchupNumber: s.matchupIndex + 1, matchupCount: round.matchups.length }
+          : {}),
+      };
+    }
+    if (s.phase === "lobby") {
+      view.takenAvatars = s.players.filter((p) => !p.audience && p.id !== id).map((p) => p.avatar);
+    }
+    if (!anon && !me.audience && ["roundResult", "podium", "summary"].includes(s.phase)) {
+      const ranked = this.ranked();
+      view.myRank = {
+        rank: ranked.filter((p) => p.score > me.score).length + 1,
+        of: ranked.length,
+        score: me.score,
+      };
+    }
+    if (!round) return view;
 
     if (s.phase === "answering" && !me.audience) {
       if (round.kind === "lastlash") {
@@ -920,6 +1147,13 @@ export class GameRoom {
           items,
           mine: round.followupBallots?.[id] ?? items.map(() => null),
         };
+      } else if (round.kind === "kudos") {
+        view.kudosForm = {
+          teammates: s.players
+            .filter((p) => p.id !== id)
+            .map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, color: p.color })),
+          mine: round.kudos?.[id] ?? null,
+        };
       } else {
         view.tasks = round.matchups
           .filter((m) => m.playerIds.includes(id))
@@ -930,6 +1164,9 @@ export class GameRoom {
           }));
       }
     }
+    if (s.phase === "matchupIntro") {
+      view.upNext = round.matchups[s.matchupIndex]?.prompt;
+    }
     if (s.phase === "voting") {
       const m = round.matchups[s.matchupIndex];
       view.vote = {
@@ -939,6 +1176,10 @@ export class GameRoom {
         canVote: !m.playerIds.includes(id),
         myChoice: m.votes[id] ?? null,
       };
+    }
+    if (s.phase === "matchupResult") {
+      const r = myResult(round.matchups[s.matchupIndex], id, anon);
+      if (r) view.myResult = r;
     }
     if (s.phase === "lashVoting") {
       const others = round.lashAnswers.filter((a) => a.playerId !== id);
@@ -983,6 +1224,26 @@ export class GameRoom {
   }
 }
 
+/** How a closed matchup went for one phone: as an author, or as a voter. */
+function myResult(m: Matchup | undefined, id: string, anon: boolean): MyResult | null {
+  if (!m?.closed) return null;
+  const counts: [number, number] = [0, 0];
+  Object.values(m.votes).forEach((v) => counts[v]++);
+  const w = counts[0] === counts[1] ? null : counts[0] > counts[1] ? 0 : 1;
+  const idx = m.playerIds.indexOf(id);
+  if (idx === 0 || idx === 1) {
+    return {
+      kind: "author",
+      won: w === null ? null : w === idx,
+      unanimous: !!m.unanimous && w === idx,
+      votes: [counts[idx], counts[1 - idx]],
+      points: anon ? null : (m.points?.[idx] ?? 0),
+    };
+  }
+  if (id in m.votes) return { kind: "voter", pickedWinner: w === null ? null : m.votes[id] === w };
+  return null;
+}
+
 /** The top-voted Last Lash answers, which people can volunteer to own. */
 function claimableAnswers(round: Round): LashAnswer[] {
   const sorted = [...round.lashAnswers].sort((a, b) => b.votes - a.votes);
@@ -999,18 +1260,21 @@ function sanitizeSettings(s: Settings): Settings {
       .filter(Boolean)
       .slice(0, max);
   const discussion = clamp(s.discussionSeconds, 0, 600, DEFAULT_SETTINGS.discussionSeconds);
+  const lang = LANGS.includes(s.lang) ? s.lang : DEFAULT_SETTINGS.lang;
   return {
     anonymous: !!s.anonymous,
     rounds: TOGGLEABLE_ROUNDS.filter((r) => (Array.isArray(s.rounds) ? s.rounds : []).includes(r)),
     answerSeconds: clamp(s.answerSeconds, 20, 300, DEFAULT_SETTINGS.answerSeconds),
     voteSeconds: clamp(s.voteSeconds, 10, 120, DEFAULT_SETTINGS.voteSeconds),
     customPrompts: list(s.customPrompts, 30, 120),
-    lashPrompt: clean(s.lashPrompt, 120) || DEFAULT_SETTINGS.lashPrompt,
+    lashPrompt: clean(s.lashPrompt, 120) || DEFAULT_LASH_PROMPT[lang],
     lashMaxAnswers: clamp(s.lashMaxAnswers, 1, 3, DEFAULT_SETTINGS.lashMaxAnswers),
     lashVotes: clamp(s.lashVotes, 1, 5, DEFAULT_SETTINGS.lashVotes),
     sprintRounds: clamp(s.sprintRounds, 0, 3, DEFAULT_SETTINGS.sprintRounds),
     // Under 15 s is too short to talk; treat it as "wait for me" only when 0.
     discussionSeconds: discussion === 0 ? 0 : Math.max(15, discussion),
     previousItems: list(s.previousItems, MAX_PREVIOUS_ITEMS, MAX_LASH_LENGTH),
+    lang,
+    pack: PACKS.includes(s.pack) ? s.pack : DEFAULT_SETTINGS.pack,
   };
 }

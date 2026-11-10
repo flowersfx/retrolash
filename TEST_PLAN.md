@@ -122,6 +122,26 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 8.11 | Last Lash results: tap *I'll take it* on a phone | Owner chip appears next to the item on the big screen, and in the Markdown export |
 | 8.12 | Reveal timing at the back of the room | Votes landing one by one is readable, not too slow; note if it drags with 10+ voters |
 
+## 9. v0.4 features
+
+| # | Step | Expected |
+|---|------|----------|
+| 9.1 | Join: pick an avatar and a plate colour | Preview plate updates; lobby tile and phone header show the colour. Avatars other players have are greyed out under *Change your look* |
+| 9.2 | Before each matchup | Big "Matchup n/m" slams in, the prompt types out, a fuse burns down, then the cards fly in. Phones show "Next up…" with the prompt |
+| 9.3 | Between matchups | The old cards leave with one of five exits (fall, fling, spin, rocket, squash); different matchups use different ones |
+| 9.4 | Reveal | Voters' name plates line up under the cards, then fly one by one onto the answer they picked, with the rising blip. Readable from the back with 8+ voters? |
+| 9.5 | A clean sweep (everyone votes the same way, at least 2 voters) | Losing card is knocked out, the winner slides to the centre and grows, RETROLASH banner + confetti + crash sound |
+| 9.6 | Phones after a reveal | Authors see "You won! 3–1 +600" / "Not this time" / RETROLASH; voters see whether they picked the winner |
+| 9.7 | Win 3 matchups in a row; or win from last place | "Hat trick" / "Comeback" sticker on the big screen. After a round where the leader changes: "… takes the lead!" |
+| 9.8 | Kudos round | Phones pick a teammate (or the whole team) and write a message. Big screen shows the notes one by one, recipient named, author never shown. Kudos in the summary and the Markdown |
+| 9.9 | End of the game | Podium: 3rd, 2nd, then a drumroll and 1st with crown and confetti; moves on to the summary by itself. Skipped in Anonymous mode |
+| 9.10 | Mid-game, a latecomer scans the corner QR | Small QR in the header works from a few metres away (or at least the code is readable) |
+| 9.11 | 🎵 button | Opens music on/off and volume sliders for music and effects. Loop starts after the first click, ducks under sound effects, gets quieter during Sprint discussions; volumes survive a reload |
+| 9.12 | Lobby: click 🎛️ on a player to make them VIP | Their phone gets a remote bar: Start in the lobby, then Next / Hold during the game. Works the same as the laptop keys |
+| 9.13 | Close the phone tab mid-game, open the QR link again | Join page offers "Continue as <name>"; tapping it rejoins as the same player with the same score |
+| 9.14 | Sprint format: pick Sailboat (or 4Ls etc.) | Intro says "Format: Sailboat ⛵"; Sprint prompts come from that pack |
+| 9.15 | Language: Svenska | Big screen, phones, prompts, round titles and Markdown export are Swedish. Paste a Swedish export into *Last retro's action items*: items are found |
+
 ## Known gaps to check while testing
 
 - Phone identity is per browser tab (sessionStorage). Closing the tab means rejoining as someone new (5.4).

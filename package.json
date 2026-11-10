@@ -1,13 +1,13 @@
 {
   "name": "retrolash",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A Quiplash-style party game for Scrum retrospectives: big screen + phones.",
   "scripts": {
     "dev": "concurrently -k -n server,web -c magenta,cyan \"tsx watch server/main.ts\" \"vite\"",
     "build": "vite build && node scripts/build-server.mjs",
     "start": "node --enable-source-maps dist-server/main.js",
     "typecheck": "tsc",
-    "test": "tsx scripts/selftest.ts && npm run build && node scripts/e2e.mjs"
+    "test": "tsx scripts/selftest.ts && npm run build && node scripts/e2e.mjs sv && node scripts/e2e.mjs en"
   },
   "dependencies": {
     "partysocket": "^1.3.0",

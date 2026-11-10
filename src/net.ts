@@ -30,7 +30,7 @@ export function normalizeCode(s: string) {
 }
 
 /** Stable per-tab device id, so a reload rejoins as the same player. */
-function deviceId(code: string) {
+export function deviceId(code: string) {
   const key = `retrolash:id:${code}`;
   try {
     let id = sessionStorage.getItem(key);
@@ -41,6 +41,15 @@ function deviceId(code: string) {
     return id;
   } catch {
     return crypto.randomUUID();
+  }
+}
+
+/** Reuse an earlier id in this tab ("Continue as …" after the tab was closed). */
+export function setDeviceId(code: string, id: string) {
+  try {
+    sessionStorage.setItem(`retrolash:id:${code}`, id);
+  } catch {
+    /* private mode */
   }
 }
 

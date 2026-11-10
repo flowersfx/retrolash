@@ -1,9 +1,23 @@
 // Shared protocol between the game server and the React clients.
 
-export type RoundKind = "checkin" | "followup" | "warmup" | "emoji" | "retro" | "lastlash";
+export type RoundKind =
+  | "checkin"
+  | "followup"
+  | "warmup"
+  | "emoji"
+  | "retro"
+  | "kudos"
+  | "lastlash";
+
+export type Lang = "en" | "sv";
+export const LANGS: Lang[] = ["en", "sv"];
+
+/** Sprint prompt packs, after common retro formats. */
+export type PackId = "mix" | "ssc" | "4ls" | "sailboat" | "msg";
+export const PACKS: PackId[] = ["mix", "ssc", "4ls", "sailboat", "msg"];
 
 /** Rounds the facilitator can switch on/off, in play order. "followup" is automatic. */
-export const TOGGLEABLE_ROUNDS: RoundKind[] = ["checkin", "warmup", "emoji", "retro", "lastlash"];
+export const TOGGLEABLE_ROUNDS: RoundKind[] = ["checkin", "warmup", "emoji", "retro", "kudos", "lastlash"];
 
 /** Head-to-head rounds: everyone gets two prompts, answers go up against each other. */
 export const isHeadToHead = (k: RoundKind | undefined) =>
@@ -29,20 +43,31 @@ export interface Settings {
   discussionSeconds: number;
   /** Last retro's action items, revisited in a "Did we do it?" round. */
   previousItems: string[];
+  /** Language for prompts and screens. */
+  lang: Lang;
+  /** Which prompt pack The Sprint uses. */
+  pack: PackId;
 }
+
+export const DEFAULT_LASH_PROMPT: Record<Lang, string> = {
+  en: "One concrete thing we should change next sprint",
+  sv: "En konkret sak vi borde ändra nästa sprint",
+};
 
 export const DEFAULT_SETTINGS: Settings = {
   anonymous: false,
-  rounds: ["checkin", "warmup", "emoji", "retro", "lastlash"],
+  rounds: ["checkin", "warmup", "emoji", "retro", "kudos", "lastlash"],
   answerSeconds: 90,
   voteSeconds: 25,
   customPrompts: [],
-  lashPrompt: "One concrete thing we should change next sprint",
+  lashPrompt: DEFAULT_LASH_PROMPT.en,
   lashMaxAnswers: 2,
   lashVotes: 3,
   sprintRounds: 0,
   discussionSeconds: 60,
   previousItems: [],
+  lang: "en",
+  pack: "mix",
 };
 
 /** How many Sprint rounds "auto" gives: at least two, three for tiny teams. */
@@ -63,6 +88,7 @@ export function planRounds(settings: Settings, players: number): RoundKind[] {
     const n = settings.sprintRounds || autoSprintRounds(players);
     for (let i = 0; i < n; i++) plan.push("retro");
   }
+  if (on.has("kudos")) plan.push("kudos");
   if (on.has("lastlash")) plan.push("lastlash");
   return plan;
 }
@@ -71,23 +97,52 @@ export type Phase =
   | "lobby"
   | "roundIntro"
   | "answering"
+  | "matchupIntro"
   | "voting"
   | "matchupResult"
   | "roundResult"
   | "pollResult"
   | "lashVoting"
   | "lashResult"
+  | "podium"
   | "summary";
+
+export const AVATARS = [
+  "🦊", "🐙", "🦉", "🐸", "🦄", "🐝", "🐳", "🦖", "🐧", "🦔", "🐢", "🦩",
+  "🐼", "🦁", "🐌", "🦦", "🐨", "🦜", "🐞", "🦀", "🐯", "🐵", "🦥", "🐲",
+];
+export const AUDIENCE_AVATARS = ["🍿", "🎩", "🕶️", "🧐", "🤠", "👽", "🤖", "🧙"];
+/** Name-plate colours. All work with dark text. */
+export const PLATE_COLORS = [
+  "#ffcf33", "#ff5ca8", "#3ee0c5", "#7c8cff", "#ff8a3d",
+  "#9be15d", "#c77dff", "#4cc9f0", "#ff7b7b", "#f9a8d4",
+];
 
 export interface PublicPlayer {
   id: string;
   name: string;
   avatar: string;
+  /** Name-plate colour (one of PLATE_COLORS). */
+  color: string;
   connected: boolean;
   score: number;
   /** Audience members vote and react, but don't answer or score. */
   audience?: boolean;
+  /** Can start, advance and hold the game from their phone. */
+  vip?: boolean;
 }
+
+/** Someone who voted, as shown on their name plate. */
+export interface VoterView {
+  name: string;
+  avatar: string;
+  color: string;
+  audience?: boolean;
+}
+
+export type Callout =
+  | { kind: "streak"; name: string; n: number }
+  | { kind: "comeback"; name: string };
 
 /** A finished or in-progress head-to-head, as shown on screen. */
 export interface MatchupView {
@@ -96,15 +151,19 @@ export interface MatchupView {
   answers: [string, string];
   /** Only revealed in non-anonymous mode, after voting. */
   authors?: [string, string];
+  /** Authors' plates, only in non-anonymous mode after voting. */
+  authorPlates?: [VoterView | null, VoterView | null];
   /** Vote counts, only after voting closes. */
   votes?: [number, number];
   /** Who voted for each side (names), only in non-anonymous mode after voting. */
   voterNames?: [string[], string[]];
-  /** Voters' avatars per side, only in non-anonymous mode after voting. */
-  voterAvatars?: [string[], string[]];
+  /** Voters' plates per side, only in non-anonymous mode after voting. */
+  voters?: [VoterView[], VoterView[]];
   /** Points awarded per side, only in non-anonymous mode. */
   points?: [number, number];
   unanimous?: boolean;
+  /** A streak or comeback worth shouting about (non-anonymous only). */
+  callout?: Callout;
 }
 
 export interface LashAnswerView {
@@ -113,7 +172,15 @@ export interface LashAnswerView {
   votes?: number;
   author?: string;
   /** People who volunteered to own this action item (always shown). */
-  owners?: { name: string; avatar: string }[];
+  owners?: { name: string; avatar: string; color?: string }[];
+}
+
+export interface KudosView {
+  /** Recipient's name, or null for "the whole team". */
+  to: string | null;
+  avatar?: string;
+  color?: string;
+  text: string;
 }
 
 export const MOODS = [
@@ -145,6 +212,7 @@ export interface SummaryRound {
   /** Check-in: counts per MOODS index. */
   moodCounts?: number[];
   followupItems?: FollowupItemView[];
+  kudos?: KudosView[];
 }
 
 /** What the big screen receives. */
@@ -177,6 +245,10 @@ export interface HostView {
   moodCounts?: number[];
   /** pollResult of a follow-up round. */
   followupItems?: FollowupItemView[];
+  /** pollResult of a kudos round. */
+  kudos?: KudosView[];
+  /** roundResult: someone new is in first place. */
+  leadChange?: string;
   summary?: SummaryRound[];
 }
 
@@ -186,16 +258,33 @@ export interface PromptTask {
   answer: string | null;
 }
 
+/** A phone's own result for the matchup just revealed. */
+export type MyResult =
+  | {
+      kind: "author";
+      /** null = tie */
+      won: boolean | null;
+      unanimous: boolean;
+      /** My votes, their votes. */
+      votes: [number, number];
+      /** null in anonymous mode. */
+      points: number | null;
+    }
+  | { kind: "voter"; pickedWinner: boolean | null };
+
 /** What a phone receives. */
 export interface PlayerView {
   role: "player";
   code: string;
   phase: Phase;
+  lang: Lang;
   you: PublicPlayer | null;
   anonymous: boolean;
   remainingMs: number | null;
   roundKind?: RoundKind;
   roundTitle?: string;
+  /** Lobby: avatars other players already have. */
+  takenAvatars?: string[];
   /** Answering phase (head-to-head rounds). */
   tasks?: PromptTask[];
   /** Answering phase (last lash). */
@@ -206,6 +295,13 @@ export interface PlayerView {
   myMood?: number | null;
   /** Answering phase (follow-up): the items and my answers so far. */
   followup?: { items: string[]; mine: (number | null)[] };
+  /** Answering phase (kudos): who I can thank, and what I sent. */
+  kudosForm?: {
+    teammates: { id: string; name: string; avatar: string; color: string }[];
+    mine: { to: string; text: string } | null;
+  };
+  /** matchupIntro: the prompt coming up. */
+  upNext?: string;
   /** Voting phase (head-to-head). */
   vote?: {
     matchupId: string;
@@ -214,6 +310,10 @@ export interface PlayerView {
     canVote: boolean;
     myChoice: 0 | 1 | null;
   };
+  /** matchupResult: how it went for me. */
+  myResult?: MyResult;
+  /** roundResult / podium / summary, non-anonymous players only. */
+  myRank?: { rank: number; of: number; score: number };
   /** Voting phase (last lash). */
   lashBallot?: {
     answers: { id: string; text: string; mine: boolean }[];
@@ -223,6 +323,16 @@ export interface PlayerView {
   };
   /** Last Lash results: top items people can volunteer to own. */
   claimable?: { id: string; text: string; votes: number; owners: string[]; mine: boolean }[];
+  /** Only for VIP phones: what the remote control can do right now. */
+  vipControls?: {
+    canStart: boolean;
+    timed: boolean;
+    paused: boolean;
+    matchupNumber?: number;
+    matchupCount?: number;
+    roundNumber: number;
+    roundCount: number;
+  };
   playerCount: number;
   minPlayers: number;
 }
@@ -235,12 +345,14 @@ export type ServerMessage =
 
 export type ClientMessage =
   | { t: "helloHost" }
-  | { t: "helloPlayer"; name: string; audience?: boolean }
+  | { t: "helloPlayer"; name: string; audience?: boolean; avatar?: string; color?: string }
+  | { t: "profile"; avatar: string; color: string }
   | { t: "settings"; settings: Partial<Settings> }
   | { t: "start" }
   | { t: "next" }
   | { t: "hold" }
   | { t: "kick"; playerId: string }
+  | { t: "vip"; playerId: string; on: boolean }
   | { t: "restart" }
   | { t: "answer"; matchupId: string; text: string }
   | { t: "lashAnswers"; texts: string[] }
@@ -248,6 +360,7 @@ export type ClientMessage =
   | { t: "lashVote"; answerIds: string[] }
   | { t: "mood"; value: number }
   | { t: "followup"; answers: (number | null)[] }
+  | { t: "kudos"; to: string; text: string }
   | { t: "claim"; answerId: string; on: boolean }
   | { t: "react"; emoji: string };
 
@@ -257,32 +370,12 @@ export const MAX_AUDIENCE = 40;
 export const MAX_ANSWER_LENGTH = 80;
 export const MAX_EMOJI_LENGTH = 40;
 export const MAX_LASH_LENGTH = 120;
+export const MAX_KUDOS_LENGTH = 120;
 export const MAX_PREVIOUS_ITEMS = 10;
+/** Kudos addressed to everyone. */
+export const KUDOS_TEAM = "team";
 
 export const REACTIONS = ["😂", "🔥", "👏", "😮", "🙈", "💯"];
-
-export const ROUND_TITLES: Record<RoundKind, string> = {
-  checkin: "Check-in",
-  followup: "Did we do it?",
-  warmup: "Warm-up",
-  emoji: "Emoji Only",
-  retro: "The Sprint",
-  lastlash: "Last Lash: Action Items",
-};
-
-/** Title for the n-th (0-based) occurrence of a round kind in the plan. */
-export function roundTitle(kind: RoundKind, occurrence: number, total: number) {
-  const base = ROUND_TITLES[kind];
-  return total > 1 ? `${base} · part ${occurrence + 1}` : base;
-}
-
-export function titledPlan(plan: RoundKind[]) {
-  return plan.map((kind, i) => {
-    const occurrence = plan.slice(0, i).filter((k) => k === kind).length;
-    const total = plan.filter((k) => k === kind).length;
-    return { kind, title: roundTitle(kind, occurrence, total) };
-  });
-}
 
 /** Keep only emoji (incl. ZWJ sequences, skin tones, flags) and single spaces. */
 export function emojiOnly(s: string): string {
@@ -292,10 +385,10 @@ export function emojiOnly(s: string): string {
   return (parts ?? []).join("").replace(/ {2,}/g, " ").trim();
 }
 
-/** Parse pasted text (e.g. last retro's Markdown export) into action items. */
+/** Parse pasted text (e.g. last retro's Markdown export, English or Swedish) into action items. */
 export function parsePreviousItems(text: string): string[] {
   let lines = text.split(/\r?\n/);
-  const start = lines.findIndex((l) => /^#+\s*action items/i.test(l.trim()));
+  const start = lines.findIndex((l) => /^#+\s*(action items|åtgärder)/i.test(l.trim()));
   if (start >= 0) {
     const rest = lines.slice(start + 1);
     const end = rest.findIndex((l) => /^#+\s/.test(l.trim()));
@@ -308,10 +401,10 @@ export function parsePreviousItems(text: string): string[] {
       l
         .replace(/^(?:[-*+]|\d+[.)])\s+/, "")
         .replace(/^\[[ xX]\]\s+/, "")
-        .replace(/\s*\(idea: [^)]*\)\s*$/i, "") // our export: "(idea: Name)"
-        .replace(/\s+—\s+owners?:.*$/i, "") // our export: "— owner: Name"
-        .replace(/(\(\d+ votes?\))\s+—\s+[^—]*$/i, "$1") // v0.1 export: "(3 votes) — Name"
-        .replace(/\s*\(\d+ votes?\)\s*$/i, "")
+        .replace(/\s*\((?:idea|idé): [^)]*\)\s*$/i, "") // our export: "(idea: Name)"
+        .replace(/\s+—\s+(?:owners?|ägare):.*$/i, "") // our export: "— owner: Name"
+        .replace(/(\(\d+ (?:votes?|röster|röst)\))\s+—\s+[^—]*$/i, "$1") // v0.1 export: "(3 votes) — Name"
+        .replace(/\s*\(\d+ (?:votes?|röster|röst)\)\s*$/i, "")
         .trim(),
     )
     .filter(Boolean)

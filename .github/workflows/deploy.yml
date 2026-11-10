@@ -30,7 +30,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npx tsx scripts/selftest.ts
-      - run: node scripts/e2e.mjs
+      - run: node scripts/e2e.mjs sv && node scripts/e2e.mjs en
 
       - uses: docker/setup-buildx-action@v3
 

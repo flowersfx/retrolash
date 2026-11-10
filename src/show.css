@@ -1,0 +1,297 @@
+/* v0.4: transitions, card exits, name plates, RETROLASH, podium, kudos, VIP,
+   look picker. Loaded after game.css. */
+
+/* ---------- stage + exits ---------- */
+.stage { width: 100%; display: grid; place-items: center; }
+.stage > * { width: 100%; }
+.stage.exiting > :not(.matchup) { animation: stageOut 0.5s ease-in forwards; }
+.stage.exiting .matchup > :not(.versus) { animation: fadeOut 0.35s ease-in forwards; }
+.stage.exiting .vs { animation: fadeOut 0.2s forwards; }
+@keyframes stageOut { to { opacity: 0; transform: scale(0.94) translateY(-24px); filter: blur(6px); } }
+@keyframes fadeOut { to { opacity: 0; } }
+
+.answer-card.side-0 { --dir: -1; }
+.answer-card.side-1 { --dir: 1; }
+/* The same five exits serve the end of a matchup and the RETROLASH knockout. */
+.stage.exiting.out-fall .answer-card:not(.gone), .answer-card.gone.out-fall { animation: outFall 0.6s cubic-bezier(.5,0,.9,.4) forwards; }
+.stage.exiting.out-fling .answer-card:not(.gone), .answer-card.gone.out-fling { animation: outFling 0.55s cubic-bezier(.6,-0.3,.8,.5) forwards; }
+.stage.exiting.out-spin .answer-card:not(.gone), .answer-card.gone.out-spin { animation: outSpin 0.55s cubic-bezier(.5,0,.8,.4) forwards; }
+.stage.exiting.out-rocket .answer-card:not(.gone), .answer-card.gone.out-rocket { animation: outRocket 0.6s cubic-bezier(.5,-0.4,.9,.5) forwards; }
+.stage.exiting.out-squash .answer-card:not(.gone), .answer-card.gone.out-squash { animation: outSquash 0.5s cubic-bezier(.5,0,.8,.5) forwards; }
+.stage.exiting .answer-card.side-1:not(.gone) { animation-delay: 0.07s; }
+.stage.exiting .answer-card.gone { opacity: 0; animation: none; }
+@keyframes outFall {
+  20% { transform: translateY(-14px) rotate(calc(var(--dir) * -3deg)); }
+  to { transform: translateY(110vh) rotate(calc(var(--dir) * 28deg)); }
+}
+@keyframes outFling { to { transform: translateX(calc(var(--dir) * 115vw)) rotate(calc(var(--dir) * 22deg)); } }
+@keyframes outSpin { to { transform: scale(0) rotate(calc(var(--dir) * 540deg)); opacity: 0; } }
+@keyframes outRocket {
+  25% { transform: translateY(18px) scale(1.03, 0.94); }
+  to { transform: translateY(-115vh) rotate(calc(var(--dir) * 10deg)) scale(0.9, 1.15); }
+}
+@keyframes outSquash {
+  35% { transform: scale(1.12, 0.82); }
+  70% { transform: scale(0.7, 1.25); opacity: 1; }
+  to { transform: scale(1.6, 0); opacity: 0; }
+}
+
+/* ---------- name plates ---------- */
+.plate {
+  --plate: var(--a);
+  display: inline-flex; align-items: center; gap: 0.35em;
+  background: var(--plate); color: #1a1033;
+  font-family: var(--display); font-weight: 800; font-size: 1.35em; line-height: 1;
+  padding: 0.3em 0.7em 0.3em 0.35em; border-radius: 999px;
+  border: 3px solid #1a1033; box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
+  white-space: nowrap; max-width: 100%;
+}
+.plate-av { display: inline-grid; place-items: center; width: 1.45em; height: 1.45em; background: rgba(255, 255, 255, 0.55); border-radius: 50%; font-size: 0.95em; }
+.plate-name { overflow: hidden; text-overflow: ellipsis; }
+.voter-pool {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5em; max-width: 70em; min-height: 2.6em;
+}
+.pool-plate { animation: pop 0.35s cubic-bezier(.3,1.6,.5,1) both; }
+.voter-pool .pool-plate:nth-child(2n) { animation-delay: 60ms; }
+.voter-pool .pool-plate:nth-child(3n) { animation-delay: 120ms; }
+.pool-plate.ghost { visibility: hidden; }
+.vote-tokens { gap: 0.45em; min-height: 2.6em; position: relative; z-index: 2; }
+.vote-tokens .plate.landed { font-size: 1.15em; }
+.vote-tokens.many .plate.landed { font-size: 0.9em; }
+.author-plate { font-size: 1.1em; margin-top: 0.5em; align-self: flex-start; }
+.answer-card .result { display: flex; flex-direction: column; }
+
+/* ---------- matchup intro: anticipation ---------- */
+.m-intro { display: flex; flex-direction: column; align-items: center; gap: 0.4em; text-align: center; animation: shake 0.35s 0.3s; }
+.m-intro-label {
+  font-family: var(--display); font-weight: 800; text-transform: uppercase; letter-spacing: 0.4em; color: var(--c); font-size: 1.6em;
+  animation: slideUp 0.5s both;
+}
+.m-intro-num {
+  font-family: var(--display); font-weight: 800; font-size: 11em; line-height: 0.9; color: var(--a);
+  text-shadow: 0 10px 0 rgba(0, 0, 0, 0.35); animation: slam 0.55s cubic-bezier(.2,1.5,.4,1) both;
+}
+.m-intro-num small { font-size: 0.3em; color: var(--muted); text-shadow: none; }
+.m-intro-prompt { font-size: 3.4em; min-height: 2.3em; margin-top: 0.3em; }
+.tw-rest { visibility: hidden; }
+.fuse { width: min(40em, 80%); height: 0.6em; border-radius: 999px; background: var(--panel); overflow: hidden; margin-top: 1em; }
+.fuse span { display: block; height: 100%; width: 100%; transform-origin: left; background: linear-gradient(90deg, var(--c), var(--a), var(--b)); animation: fuse linear both; }
+@keyframes fuse { from { transform: scaleX(0); } }
+@keyframes slam {
+  0% { transform: scale(3.5) rotate(-8deg); opacity: 0; }
+  60% { transform: scale(0.92) rotate(1deg); opacity: 1; }
+}
+@keyframes shake {
+  20% { transform: translate(-6px, 3px); }
+  40% { transform: translate(6px, -3px); }
+  60% { transform: translate(-4px, 2px); }
+  80% { transform: translate(3px, -1px); }
+}
+.prompt-big.settle { animation: settle 0.7s cubic-bezier(.2,1.1,.3,1) both; }
+@keyframes settle { from { transform: translateY(16vh) scale(1.15); } }
+
+/* ---------- RETROLASH: loser knocked out, winner takes centre stage ---------- */
+.versus.retrolash .vs { opacity: 0; transition: opacity 0.3s; }
+.answer-card.gone { pointer-events: none; }
+.versus.retrolash .answer-card.champion {
+  z-index: 3;
+  transition: transform 0.85s cubic-bezier(.2,1.3,.4,1) 0.35s, box-shadow 0.4s;
+  box-shadow: 0 0 0 6px var(--ink), 0 0 80px 10px rgba(255, 207, 51, 0.45), 0 24px 70px rgba(0, 0, 0, 0.45);
+}
+.versus.retrolash .answer-card.champion.side-0 { transform: translateX(calc(50% + 2em)) scale(1.14); }
+.versus.retrolash .answer-card.champion.side-1 { transform: translateX(calc(-50% - 2em)) scale(1.14); }
+.retrolash-banner {
+  font-size: 6em; color: var(--a); letter-spacing: -0.02em;
+  text-shadow: 0 8px 0 #b8870a, 0 14px 30px rgba(0, 0, 0, 0.5);
+  animation: lashBanner 1s cubic-bezier(.2,1.6,.4,1) 0.5s both, wobble 1.6s ease-in-out 1.6s infinite;
+}
+@keyframes lashBanner {
+  0% { transform: scale(0.1) rotate(-25deg); opacity: 0; }
+  55% { transform: scale(1.3) rotate(4deg); opacity: 1; }
+  75% { transform: scale(0.95) rotate(-2deg); }
+}
+@keyframes wobble { 50% { transform: rotate(-2deg) scale(1.04); } }
+.phase-matchupResult .versus.retrolash { animation: shake 0.4s 0.45s; }
+
+/* ---------- confetti ---------- */
+.confetti { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 40; }
+.confetti i {
+  position: absolute; top: -4vh; border-radius: 2px;
+  animation-name: confetti; animation-timing-function: cubic-bezier(.3,.5,.6,1); animation-fill-mode: both;
+}
+@keyframes confetti {
+  0% { transform: translate(0, 0) rotate(0); opacity: 1; }
+  100% { transform: translate(var(--drift), 110vh) rotate(var(--rot)); opacity: 0.8; }
+}
+
+/* ---------- callouts ---------- */
+.callout {
+  font-family: var(--display); font-weight: 800; font-size: 2.2em;
+  background: var(--b); color: #2a0016; padding: 0.3em 0.9em; border-radius: 16px;
+  transform: rotate(-2deg); box-shadow: 0 6px 0 rgba(0, 0, 0, 0.3);
+  animation: calloutIn 0.6s cubic-bezier(.2,1.7,.4,1) both;
+}
+@keyframes calloutIn { from { transform: scale(0.3) rotate(-14deg); opacity: 0; } }
+
+/* ---------- header extras ---------- */
+.mini-join { display: flex; align-items: center; gap: 0.6em; background: var(--panel); border-radius: 14px; padding: 0.35em 0.8em 0.35em 0.35em; }
+.mini-qr { background: #fff; border-radius: 8px; padding: 3px; }
+.mini-qr svg { display: block; width: 3.6em; height: 3.6em; }
+.mini-text { display: flex; flex-direction: column; line-height: 1.1; }
+.mini-text small { color: var(--muted); font-size: 0.75em; }
+.mini-text b { font-family: var(--display); color: var(--a); letter-spacing: 0.12em; font-size: 1.5em; }
+.sound-btn.off { opacity: 0.4; }
+
+/* ---------- lobby extras ---------- */
+.player-tile { box-shadow: inset 7px 0 0 var(--plate, transparent); }
+.vip-btn {
+  background: none; border: 0; cursor: pointer; font-size: 0.95em; opacity: 0; transition: opacity 0.2s;
+  border-radius: 999px; padding: 0.1em 0.4em; color: var(--ink); white-space: nowrap;
+}
+.player-tile:hover .vip-btn, .audience-chip:hover .vip-btn, .vip-btn.on { opacity: 1; }
+.vip-btn.on { background: var(--d); color: #0b0b2a; font-weight: 800; }
+.player-tile .vip-btn { margin-left: auto; }
+.player-tile .vip-btn + .kick { margin-left: 0; }
+.seg { display: inline-flex; background: var(--bg); border-radius: 999px; padding: 3px; gap: 3px; }
+.seg button { border: 0; background: none; border-radius: 999px; padding: 0.35em 0.9em; font-weight: 700; cursor: pointer; color: var(--muted); }
+.seg button.on { background: var(--c); color: #04302a; }
+.pack-select { display: inline-flex; align-items: center; gap: 0.5em; color: var(--muted); font-weight: 600; margin-left: auto; }
+.pack-select select { font-size: 0.95rem; padding: 0.45em 0.7em; color: var(--ink); background: var(--bg); border: 2px solid var(--b); border-radius: 999px; }
+.intro-pack { font-size: 1.4em; font-weight: 700; color: var(--b); margin: 0.8em 0 0; }
+
+/* ---------- in-game accents ---------- */
+.done-tile { box-shadow: inset 6px 0 0 var(--plate, transparent); }
+.strip-av { background: color-mix(in srgb, var(--plate, var(--panel)) 45%, var(--panel)); }
+.scoreboard li { grid-template-columns: 2.2em minmax(9em, auto) 1fr 4.5em; }
+.scoreboard .plate { font-size: 1.05em; }
+
+/* ---------- kudos ---------- */
+.kudos-result { display: flex; flex-direction: column; align-items: center; gap: 1.4em; }
+.kudos-wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(20em, 1fr)); gap: 1.2em; width: min(90em, 100%); }
+.kudos-card {
+  background: #fff8e6; color: #2a1600; border-radius: 18px; padding: 1.1em 1.3em 1.3em;
+  box-shadow: 0 10px 0 rgba(0, 0, 0, 0.25), inset 0 8px 0 var(--plate);
+  display: flex; flex-direction: column; gap: 0.7em; transform: rotate(var(--tilt));
+  animation: kudosIn 0.7s cubic-bezier(.2,1.5,.4,1) both;
+}
+.kudos-card p { margin: 0; font-family: var(--display); font-weight: 700; font-size: 1.5em; line-height: 1.2; }
+.kudos-card .plate { align-self: flex-start; font-size: 1.05em; }
+@keyframes kudosIn { from { transform: translateY(-60px) rotate(calc(var(--tilt) * -6)) scale(0.6); opacity: 0; } }
+.kudos-wall.small { grid-template-columns: 1fr; gap: 0.6em; }
+.kudos-wall.small .kudos-card { transform: none; animation: none; padding: 0.7em 1em; }
+.kudos-wall.small .kudos-card p { font-size: 1.05em; }
+
+/* ---------- podium ---------- */
+.podium-stage { display: flex; flex-direction: column; align-items: center; gap: 1.2em; }
+.podium { display: grid; grid-template-columns: repeat(3, minmax(12em, 18em)); align-items: end; gap: 1.5em; height: 52vh; }
+.podium-col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 0.6em; }
+.podium-block {
+  width: 100%; border-radius: 18px 18px 6px 6px; display: grid; place-items: center;
+  font-family: var(--display); font-weight: 800; font-size: 4em; color: rgba(26, 16, 51, 0.55);
+  background: linear-gradient(var(--plate), color-mix(in srgb, var(--plate) 55%, #1a1033));
+  transform-origin: bottom; transform: scaleY(0.08); opacity: 0.35;
+  transition: transform 0.8s cubic-bezier(.2,1.4,.4,1), opacity 0.3s;
+}
+.place-1 .podium-block { height: 62%; }
+.place-2 .podium-block { height: 44%; }
+.place-3 .podium-block { height: 30%; }
+.podium-col.up .podium-block { transform: none; opacity: 1; }
+.podium-winner { display: flex; flex-direction: column; align-items: center; gap: 0.3em; animation: zoomIn 0.6s cubic-bezier(.2,1.6,.4,1) both; }
+.podium-plate { font-size: 1.6em; }
+.place-1 .podium-plate { font-size: 2.1em; }
+.podium-score { font-family: var(--display); font-weight: 800; font-size: 2em; }
+.crown { font-size: 4em; animation: crownDrop 0.9s cubic-bezier(.3,1.6,.5,1) both; }
+@keyframes crownDrop { from { transform: translateY(-40vh) rotate(-30deg); } }
+.podium-rest { display: flex; flex-wrap: wrap; gap: 0.8em 1.4em; justify-content: center; font-weight: 700; animation: slideUp 0.5s 0.6s both; }
+.podium-rest .plate { font-size: 1em; }
+
+/* ---------- phone ---------- */
+.rejoin { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1.5rem; }
+.rejoin .btn { justify-content: center; }
+.look-field { display: flex; flex-direction: column; gap: 0.5rem; font-weight: 600; color: var(--muted); }
+.look-picker { display: flex; flex-direction: column; gap: 0.8rem; align-items: center; }
+.look-picker .plate.preview { font-size: 1.5rem; }
+.avatar-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 0.3rem; width: 100%; }
+.av-btn { font-size: 1.5rem; aspect-ratio: 1; border-radius: 12px; border: 2px solid transparent; background: var(--panel); cursor: pointer; padding: 0; }
+.av-btn.chosen { border-color: var(--a); background: var(--panel-2); transform: scale(1.1); }
+.av-btn:disabled { opacity: 0.2; }
+.color-row { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center; }
+.swatch { width: 2.1rem; height: 2.1rem; border-radius: 50%; border: 3px solid var(--bg); cursor: pointer; }
+.swatch.chosen { box-shadow: 0 0 0 3px var(--ink); }
+.plate.me { font-size: 1rem; padding: 0.25rem 0.8rem 0.25rem 0.25rem; }
+.badge.vip { background: var(--a); }
+.phone.has-vip { padding-bottom: 6.5rem; }
+.has-vip .btn.sticky { bottom: 5.8rem; }
+.vip-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  display: flex; gap: 0.6rem; align-items: center; justify-content: flex-end;
+  padding: 0.7rem 1rem max(0.7rem, env(safe-area-inset-bottom));
+  background: rgba(26, 16, 51, 0.92); backdrop-filter: blur(6px); border-top: 2px solid var(--d);
+}
+.vip-label { margin-right: auto; font-weight: 700; color: var(--d); font-size: 0.85rem; }
+.my-result { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.6rem; text-align: center; padding-bottom: 12vh; }
+.my-result h2 { font-size: 2.4rem; animation: zoomIn 0.5s cubic-bezier(.2,1.6,.4,1) both; }
+.big-score { font-family: var(--display); font-weight: 800; font-size: 4.5rem; line-height: 1; }
+.my-result.win .big-score { color: var(--a); }
+.my-result.lose .big-score { color: var(--muted); }
+.my-result.lash h2 { color: var(--a); animation: lashBanner 0.9s cubic-bezier(.2,1.6,.4,1) both; }
+.pts { margin: 0; font-weight: 800; font-size: 1.4rem; color: var(--c); }
+.up-next { margin-top: 1rem; color: var(--ink); }
+.kudos-to-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.plate.pick { font-size: 1rem; cursor: pointer; opacity: 0.6; }
+.plate.pick.chosen { opacity: 1; transform: scale(1.06); box-shadow: 0 0 0 3px var(--ink), 0 4px 0 rgba(0, 0, 0, 0.35); }
+
+@media (max-width: 900px) {
+  .versus.retrolash .answer-card.champion.side-0,
+  .versus.retrolash .answer-card.champion.side-1 { transform: scale(1.04); }
+  .podium { grid-template-columns: repeat(3, 1fr); gap: 0.6em; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confetti { display: none; }
+  .tw-rest { visibility: visible; }
+}
+
+/* Lobby tiles: keep room for the name; tools appear on hover. */
+.player-tile .pname { flex: 1; min-width: 0; }
+.player-tile .vip-btn:not(.on), .audience-chip .vip-btn:not(.on) { display: none; }
+.player-tile:hover .vip-btn, .audience-chip:hover .vip-btn { display: inline-block; }
+.player-tile .vip-btn { margin-left: 0; }
+
+/* Bigger plates: they're the stars of the reveal. */
+.voter-pool .plate { font-size: 1.75em; }
+.vote-tokens .plate.landed { font-size: 1.45em; }
+.vote-tokens.many .plate.landed { font-size: 1.05em; }
+.author-plate { font-size: 1.3em; }
+
+/* The RETROLASH banner slams over the middle of the screen, then lifts away,
+   so it never pushes content below the fold. */
+.banner.retrolash-banner {
+  position: fixed; left: 50%; top: 46%; z-index: 45; pointer-events: none; white-space: nowrap;
+  font-size: 9em; transform: translate(-50%, -50%);
+  animation: lashOverlay 3.2s cubic-bezier(.2,1.4,.4,1) 0.45s both;
+}
+@keyframes lashOverlay {
+  0% { transform: translate(-50%, -50%) scale(0.1) rotate(-25deg); opacity: 0; }
+  14% { transform: translate(-50%, -50%) scale(1.25) rotate(4deg); opacity: 1; }
+  24% { transform: translate(-50%, -50%) scale(1) rotate(-3deg); }
+  72% { transform: translate(-50%, -50%) scale(1.04) rotate(-3deg); opacity: 1; }
+  100% { transform: translate(-50%, -160%) scale(0.45) rotate(-3deg); opacity: 0; }
+}
+/* Scale plates down as the crowd grows. */
+.vote-tokens.some .plate.landed { font-size: 1.2em; }
+.voter-pool.crowd .plate { font-size: 1.25em; }
+
+/* ---------- volume panel ---------- */
+.vol-wrap { position: relative; }
+.vol-panel {
+  position: absolute; right: 0; top: calc(100% + 0.5em); z-index: 60; width: 18em;
+  background: var(--panel); border: 2px solid var(--panel-2); border-radius: 16px; padding: 0.9em 1em;
+  display: flex; flex-direction: column; gap: 0.7em; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  animation: pop 0.25s cubic-bezier(.3,1.6,.5,1) both; font-size: 0.9rem;
+}
+.vol-row { display: grid; grid-template-columns: 6.5em 1fr 2.2em; align-items: center; gap: 0.5em; font-weight: 600; }
+.vol-row input { padding: 0; accent-color: var(--a); border: 0; background: none; }
+.vol-row b { text-align: right; font-variant-numeric: tabular-nums; }
+.vol-row.dim { opacity: 0.45; }
+.vol-panel .small-print { text-align: left; }
