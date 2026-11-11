@@ -7,7 +7,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createReadStream } from "node:fs";
-import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -36,9 +36,19 @@ const speech = new AzureSpeech({
     en: process.env.SPEECH_VOICE_EN ?? "en-US-JennyNeural",
     sv: process.env.SPEECH_VOICE_SV ?? "sv-SE-SofieNeural",
   },
+  // Jenny has a cheerful style; Sofie has none, so Swedish stays plain unless set.
+  styles: { en: process.env.SPEECH_STYLE_EN ?? "cheerful", sv: process.env.SPEECH_STYLE_SV ?? "" },
   fake: process.env.TTS_FAKE === "1",
   log: (...args) => log(...args),
 });
+
+/** One JSON line per game start and finish (counts only) in DATA_DIR/usage.jsonl.
+ * Console logs vanish when the app scales to zero, so the file is the record. */
+function recordUsage(e: Record<string, unknown>) {
+  const line = JSON.stringify(e);
+  log("usage", line);
+  if (persist) void appendFile(path.join(DATA_DIR, "usage.jsonl"), line + "\n").catch((err) => log("usage: write failed", err));
+}
 
 const ROOM_PATH = /^\/parties\/main\/([a-z]{4})\/?$/;
 const DEVICE_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -158,7 +168,7 @@ class RoomHost implements Room {
 
   constructor(readonly id: string) {
     this.storage = new FileStorage(path.join(DATA_DIR, `${id}.json`));
-    this.game = new GameRoom(this, TIME_SCALE, speech);
+    this.game = new GameRoom(this, TIME_SCALE, speech, recordUsage);
     this.ready = this.game.onStart();
     this.queue = this.ready.catch((err) => log(`room ${id} failed to start`, err));
   }

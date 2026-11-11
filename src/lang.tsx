@@ -38,6 +38,8 @@ export function nextLabel(
     case "pollResult":
     case "lashResult":
       if (v.roundNumber < v.roundCount) return t.next.nextRound;
+      return t.next.finishGame;
+    case "highlights":
       return v.anonymous ? t.next.showSummary : t.next.showPodium;
     case "podium":
       return t.next.showSummary;

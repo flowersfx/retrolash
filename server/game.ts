@@ -22,11 +22,14 @@ import {
   PLATE_COLORS,
   REACTIONS,
   TOGGLEABLE_ROUNDS,
+  HIGHLIGHT_STEP_MS,
+  PODIUM_REVEAL,
   emojiOnly,
   isHeadToHead,
   planRounds,
   type ClientMessage,
   type FollowupItemView,
+  type HighlightView,
   type HostView,
   type KudosView,
   type LashAnswerView,
@@ -43,7 +46,8 @@ import {
   type SummaryRound,
   type VoterView,
 } from "../shared/types";
-import { roundTitle, strings, titledPlan } from "../shared/i18n";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { roundTitle, spokenTitle, strings, titledPlan } from "../shared/i18n";
 import { prompts, shuffle, sprintPrompts } from "../shared/prompts";
 
 // ---------- runtime contract ----------
@@ -70,6 +74,12 @@ export interface SpeechLine {
 }
 
 export type SpeechClip = SpokenClip;
+
+/** A line with an optional start time on the screen (ms after it appears). */
+export type TimedLine = SpeechLine & { at?: number };
+
+/** Anonymous usage numbers: counts only, never names or answers. */
+export type UsageEvent = Record<string, string | number | boolean>;
 
 /** Text to speech (server/tts.ts). Optional: without it the game is silent. */
 export interface Speech {
@@ -101,6 +111,8 @@ interface Matchup {
   unanimous?: boolean;
   closed?: boolean;
   callout?: MatchupView["callout"];
+  /** Sides the game answered because the timer ran out. */
+  auto?: [boolean, boolean];
 }
 
 interface LashAnswer {
@@ -153,6 +165,9 @@ interface GameState {
   leadChange: string | null;
   /** Clips for the current screen, fixed when the phase starts. */
   say: SpeechClip[] | null;
+  /** SHA-256 of the big screen's secret; the first big screen gets the secret. */
+  hostTokenHash?: string;
+  startedAt?: number;
 }
 
 type ConnState = { role: "host" } | { role: "player" } | undefined;
@@ -220,16 +235,18 @@ export class GameRoom {
     readonly room: Room,
     private readonly timeScale = 1,
     private readonly speech?: Speech,
+    private readonly onUsage?: (e: UsageEvent) => void,
   ) {}
 
-  /** Generate the round titles in both languages once, so even the first intro can speak. */
+  /** Generate the lines every game uses, in both languages, once. */
   static warmSpeech(speech: Speech) {
     if (!speech.enabled) return;
     const lines: SpeechLine[] = [];
-    for (const lang of LANGS)
-      for (const kind of [...TOGGLEABLE_ROUNDS, "followup" as const])
-        for (let total = 1; total <= 3; total++)
-          for (let i = 0; i < total; i++) lines.push({ text: roundTitle(kind, i, total, lang), lang, scope: "lib" });
+    for (const lang of LANGS) {
+      const t = strings(lang);
+      for (const text of [t.spoken.highlights, t.spoken.winnerIntro(false), t.spoken.winnerIntro(true)])
+        lines.push({ text, lang, scope: "lib" });
+    }
     speech.prefetch(lines);
   }
 
@@ -291,9 +308,7 @@ export class GameRoom {
 
     switch (msg.t) {
       case "helloHost":
-        conn.setState({ role: "host" });
-        this.sendView(conn);
-        return;
+        return this.onHostHello(conn, msg.token);
       case "helloPlayer":
         return this.onPlayerHello(conn, msg);
       case "react":
@@ -303,6 +318,30 @@ export class GameRoom {
 
     if (role === "host") return this.onHostMessage(msg);
     if (role === "player") return this.onPlayerMessage(conn.id, msg);
+  }
+
+  // ---------- big screen ----------
+
+  /**
+   * The first big screen of a room gets a secret token; after that, only a
+   * screen that presents it may host. Without this, anyone who sees the room
+   * code could open ?host=CODE and run the game.
+   */
+  onHostHello(conn: Connection, token: unknown) {
+    const s = this.state;
+    if (!s.hostTokenHash) {
+      const fresh = randomBytes(24).toString("hex");
+      s.hostTokenHash = hashToken(fresh);
+      conn.setState({ role: "host" });
+      const msg: ServerMessage = { t: "hostToken", token: fresh };
+      conn.send(JSON.stringify(msg));
+      this.commit();
+      return;
+    }
+    const ok = typeof token === "string" && /^[a-f0-9]{48}$/.test(token) && sameHash(hashToken(token), s.hostTokenHash);
+    if (!ok) return this.error(conn, this.t().errors.hostTaken);
+    conn.setState({ role: "host" });
+    this.sendView(conn);
   }
 
   // ---------- player join ----------
@@ -444,11 +483,10 @@ export class GameRoom {
         s.leaderId = null;
         s.leadChange = null;
         s.players.forEach((p) => (p.score = 0));
-        this.speech?.prefetch([
-          ...titledPlan(plan, s.settings.lang).map((r) => this.line(r.title)),
-          this.line(s.settings.lashPrompt),
-        ]);
+        s.startedAt = Date.now();
+        this.prefetchLobby();
         this.startRound();
+        this.usage("start");
         break;
       }
       case "next":
@@ -462,6 +500,7 @@ export class GameRoom {
         this.dispose();
         this.state = freshState(s.settings);
         this.state.players = players;
+        this.state.hostTokenHash = s.hostTokenHash;
         break;
       }
       default:
@@ -618,7 +657,8 @@ export class GameRoom {
         : {}),
     };
     s.matchupIndex = 0;
-    this.spokenPhase("roundIntro", INTRO_MS, [this.line(s.rounds[s.roundIndex].title)], 1500);
+    const intro = this.t().spoken.round(s.roundIndex + 1, spokenTitle(s.rounds[s.roundIndex].title));
+    this.spokenPhase("roundIntro", INTRO_MS, [this.line(intro, "lib")], 1500);
   }
 
   beginAnswering() {
@@ -669,8 +709,23 @@ export class GameRoom {
       this.setPhase("lashVoting", Math.max(45, this.state.settings.voteSeconds * 2) * 1000);
       return;
     }
+    this.fillMissing(round);
     this.state.matchupIndex = 0;
     this.beginVoting();
+  }
+
+  /** Quiplash-style: a player who ran out of time gets a 🆘 answer, so nobody wins by walkover. */
+  fillMissing(round: Round) {
+    const set = prompts(this.state.settings.lang);
+    const pool = round.kind === "emoji" ? set.safetyEmoji : set.safetyQuips;
+    for (const m of round.matchups) {
+      const missing = ([0, 1] as const).filter((i) => m.answers[i] === null);
+      if (missing.length !== 1) continue; // both empty: the matchup is skipped
+      const i = missing[0];
+      const options = pool.filter((q) => q !== m.answers[1 - i]);
+      m.answers[i] = options[Math.floor(Math.random() * options.length)];
+      m.auto = i === 0 ? [true, false] : [false, true];
+    }
   }
 
   /** Find the next matchup worth playing and announce it. */
@@ -703,16 +758,19 @@ export class GameRoom {
     Object.values(m.votes).forEach((v) => counts[v]++);
     const total = counts[0] + counts[1];
     const mult = round.multiplier;
+    const auto = m.auto ?? [false, false];
     const points: [number, number] = [counts[0] * 100 * mult, counts[1] * 100 * mult];
-    // An empty answer forfeits.
-    if (m.answers[0] === null) points[0] = 0;
-    if (m.answers[1] === null) points[1] = 0;
+    // An empty answer forfeits; an automatic one earns half its vote points and no win bonus.
+    ([0, 1] as const).forEach((i) => {
+      if (m.answers[i] === null) points[i] = 0;
+      else if (auto[i]) points[i] = Math.floor(points[i] / 2);
+    });
     let winner: 0 | 1 | null = null;
     if (counts[0] !== counts[1]) {
       winner = counts[0] > counts[1] ? 0 : 1;
       const unanimous = total >= 2 && counts[1 - winner] === 0;
       m.unanimous = unanimous;
-      points[winner] += (unanimous ? 250 : 100) * mult;
+      if (!auto[winner]) points[winner] += (unanimous ? 250 : 100) * mult;
     }
     const before = new Map(s.players.map((p) => [p.id, p.score]));
     m.points = points;
@@ -720,9 +778,10 @@ export class GameRoom {
     m.playerIds.forEach((id, i) => {
       const p = this.player(id);
       if (p) p.score += points[i];
-      s.streaks[id] = winner === i ? (s.streaks[id] ?? 0) + 1 : 0;
+      s.streaks[id] = winner === i && !auto[i] ? (s.streaks[id] ?? 0) + 1 : 0;
     });
     m.callout = this.callout(m, winner, before);
+    this.prefetchWinner();
     // Sprint results pause for discussion (timed unless set to "wait for me").
     const d = s.settings.discussionSeconds;
     const ms = round.kind === "retro" ? (d === 0 ? null : d * 1000) : QUICK_RESULT_MS;
@@ -731,7 +790,7 @@ export class GameRoom {
 
   /** A hat trick (3+ wins in a row) or a climb out of last place. */
   callout(m: Matchup, winner: 0 | 1 | null, before: Map<string, number>): MatchupView["callout"] {
-    if (winner === null || this.state.settings.anonymous) return undefined;
+    if (winner === null || this.state.settings.anonymous || m.auto?.[winner]) return undefined;
     const id = m.playerIds[winner];
     const p = this.player(id);
     if (!p) return undefined;
@@ -779,6 +838,7 @@ export class GameRoom {
       const p = this.player(a.playerId);
       if (p) p.score += a.votes * 100 * round.multiplier;
     }
+    this.prefetchWinner();
     // The final part waits for the facilitator: people volunteer as owners here.
     this.setPhase("lashResult", null);
   }
@@ -786,13 +846,125 @@ export class GameRoom {
   nextRound() {
     const s = this.state;
     s.roundIndex++;
-    if (s.roundIndex >= s.plan.length) {
-      // Crown the winners first, unless there's nothing to crown.
-      const scored = !s.settings.anonymous && s.players.some((p) => !p.audience && p.score > 0);
-      this.setPhase(scored ? "podium" : "summary", scored ? PODIUM_MS : null);
-    } else {
-      this.startRound();
+    if (s.roundIndex >= s.plan.length) this.endGame();
+    else this.startRound();
+  }
+
+  /** After the last round: the best answers, then the podium, then the summary. */
+  endGame() {
+    const best = this.highlights();
+    if (best.length === 0) return this.afterHighlights();
+    const ms = 4500 + best.length * HIGHLIGHT_STEP_MS;
+    this.spokenPhase("highlights", ms, [this.line(this.t().spoken.highlights, "lib")], 0);
+  }
+
+  afterHighlights() {
+    const s = this.state;
+    // Crown the winners first, unless there's nothing to crown.
+    const scored = !s.settings.anonymous && s.players.some((p) => !p.audience && p.score > 0);
+    if (!scored) return this.toSummary();
+    this.spokenPhase("podium", PODIUM_MS, this.winnerLines(), 1500);
+  }
+
+  toSummary() {
+    this.setPhase("summary", null);
+    this.usage("game");
+  }
+
+  /** "And the winner is…" during the drumroll, then the name(s) as first place appears. */
+  winnerLines(): TimedLine[] {
+    const ranked = this.ranked();
+    const best = ranked[0]?.score ?? 0;
+    const top = ranked.filter((p) => p.score === best && p.score > 0);
+    if (top.length === 0) return [];
+    const t = this.t();
+    return [
+      { ...this.line(t.spoken.winnerIntro(top.length > 1), "lib"), at: PODIUM_REVEAL.intro },
+      { ...this.line(t.spoken.winners(top.map((p) => p.name)), "room"), at: PODIUM_REVEAL.first },
+    ];
+  }
+
+  /** Keep the current leader's name ready, so the podium can say it. */
+  prefetchWinner() {
+    if (!this.speech?.enabled || !this.state.settings.speech || this.state.settings.anonymous) return;
+    this.speech.prefetch(this.winnerLines());
+  }
+
+  /** In the lobby, prepare the lines the planned game will say. */
+  prefetchLobby() {
+    const s = this.state;
+    if (!this.speech?.enabled || !s.settings.speech) return;
+    const t = this.t();
+    const plan = titledPlan(this.currentPlan(), s.settings.lang);
+    this.speech.prefetch([
+      ...plan.map((r, i) => this.line(t.spoken.round(i + 1, spokenTitle(r.title)), "lib")),
+      this.line(s.settings.lashPrompt),
+      this.line(t.spoken.highlights, "lib"),
+    ]);
+  }
+
+  /** The game's best answers: clean sweeps first, then the most votes. Auto-answers don't count. */
+  highlights(): HighlightView[] {
+    const anon = this.state.settings.anonymous;
+    const picks: { h: HighlightView; rank: number }[] = [];
+    for (const r of this.state.rounds) {
+      if (!isHeadToHead(r.kind)) continue;
+      for (const m of r.matchups) {
+        if (!m.closed) continue;
+        const counts: [number, number] = [0, 0];
+        Object.values(m.votes).forEach((v) => counts[v]++);
+        if (counts[0] === counts[1]) continue;
+        const w = counts[0] > counts[1] ? 0 : 1;
+        const answer = m.answers[w];
+        if (answer === null || m.auto?.[w]) continue;
+        const total = counts[0] + counts[1];
+        const h: HighlightView = {
+          prompt: m.prompt,
+          answer,
+          votes: counts[w],
+          total,
+          unanimous: !!m.unanimous,
+          round: r.title,
+          emoji: r.kind === "emoji",
+          ...(anon ? {} : { author: this.player(m.playerIds[w]) ? this.plate(m.playerIds[w]) : null }),
+        };
+        picks.push({ h, rank: (m.unanimous ? 10_000 : 0) + counts[w] * 100 + total });
+      }
     }
+    return picks
+      .sort((a, b) => b.rank - a.rank)
+      .slice(0, 3)
+      .map((p) => p.h);
+  }
+
+  /** One line per game start and finish, with counts only. */
+  usage(event: "start" | "game") {
+    if (!this.onUsage) return;
+    const s = this.state;
+    const players = s.players.filter((p) => !p.audience).length;
+    const base: UsageEvent = {
+      event,
+      at: new Date().toISOString(),
+      players,
+      audience: s.players.length - players,
+      rounds: s.plan.length,
+      lang: s.settings.lang,
+      pack: s.settings.pack,
+      speech: !!this.speech?.enabled && s.settings.speech,
+      anonymous: s.settings.anonymous,
+    };
+    if (event === "start") return this.onUsage(base);
+    const matchups = s.rounds.flatMap((r) => r.matchups.filter((m) => m.closed));
+    const lash = s.rounds.find((r) => r.kind === "lastlash");
+    this.onUsage({
+      ...base,
+      minutes: s.startedAt ? Math.round((Date.now() - s.startedAt) / 6000) / 10 : 0,
+      matchups: matchups.length,
+      autoAnswers: matchups.reduce((a, m) => a + (m.auto?.filter(Boolean).length ?? 0), 0),
+      kudos: Object.keys(s.rounds.find((r) => r.kind === "kudos")?.kudos ?? {}).length,
+      actionItems: lash?.lashAnswers.length ?? 0,
+      owned: lash?.lashAnswers.filter((a) => a.owners?.length).length ?? 0,
+    });
   }
 
   /** Host pressed "next", or a timer ran out. */
@@ -814,8 +986,10 @@ export class GameRoom {
         return this.nextRound();
       case "lashVoting":
         return this.endLashVoting();
+      case "highlights":
+        return this.afterHighlights();
       case "podium":
-        return this.setPhase("summary", null);
+        return this.toSummary();
     }
   }
 
@@ -869,21 +1043,31 @@ export class GameRoom {
    * Start a phase that speaks. Clips are used only if they are all ready now, and
    * the phase stretches to fit them (plus pad). Otherwise it runs silent, on time.
    */
-  spokenPhase(phase: Phase, baseMs: number, lines: SpeechLine[], padMs: number) {
+  spokenPhase(phase: Phase, baseMs: number, lines: TimedLine[], padMs: number) {
     const clips = this.clips(lines);
-    const spoken = clips ? clips.reduce((a, c) => a + c.ms, 0) + padMs : 0;
-    this.setPhase(phase, Math.max(baseMs, spoken), clips);
+    let end = 0;
+    let cursor = 0;
+    for (const c of clips ?? []) {
+      cursor = (c.at ?? cursor) + c.ms;
+      end = Math.max(end, cursor);
+    }
+    this.setPhase(phase, Math.max(baseMs, clips ? end + padMs : 0), clips);
   }
 
-  clips(lines: SpeechLine[]): SpeechClip[] | null {
+  clips(lines: TimedLine[]): SpeechClip[] | null {
     if (!this.speech?.enabled || !this.state.settings.speech) return null;
-    const clips = lines.filter((l) => l.text.trim()).map((l) => this.speech!.get(l));
+    const clips = lines
+      .filter((l) => l.text.trim())
+      .map((l) => {
+        const c = this.speech!.get(l);
+        return c && l.at !== undefined ? { ...c, at: l.at } : c;
+      });
     return clips.length && clips.every((c) => c) ? (clips as SpeechClip[]) : null;
   }
 
   /** A line in the room language; built-in text is cached for good, the rest per room. */
-  line(text: string): SpeechLine {
-    return { text, lang: this.state.settings.lang, scope: isLibraryText(text) ? "lib" : "room" };
+  line(text: string, scope?: SpeechLine["scope"]): SpeechLine {
+    return { text, lang: this.state.settings.lang, scope: scope ?? (isLibraryText(text) ? "lib" : "room") };
   }
 
   // ---------- helpers ----------
@@ -1017,6 +1201,7 @@ export class GameRoom {
       }
       view.votes = counts;
       view.unanimous = m.unanimous;
+      if (m.auto) view.auto = m.auto;
       if (!anon) {
         view.authors = [this.name(m.playerIds[0]), this.name(m.playerIds[1])];
         view.authorPlates = [
@@ -1152,6 +1337,7 @@ export class GameRoom {
       view.followupItems = (round.followupItems ?? []).map((text) => ({ text, counts: [] }));
     }
     if (s.phase === "roundResult" && s.leadChange) view.leadChange = s.leadChange;
+    if (s.phase === "highlights") view.highlights = this.highlights();
     if (s.phase === "summary") view.summary = this.summary();
     return view;
   }
@@ -1288,9 +1474,20 @@ export class GameRoom {
 
   /** Persist and push fresh views to everyone. */
   commit() {
+    if (this.state.phase === "lobby") this.prefetchLobby();
     void this.room.storage.put("state", this.state);
     for (const c of this.room.getConnections()) this.sendView(c);
   }
+}
+
+function hashToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function sameHash(a: string, b: string) {
+  const x = Buffer.from(a, "hex");
+  const y = Buffer.from(b, "hex");
+  return x.length === y.length && timingSafeEqual(x, y);
 }
 
 let library: Set<string> | null = null;
@@ -1324,6 +1521,7 @@ function myResult(m: Matchup | undefined, id: string, anon: boolean): MyResult |
       unanimous: !!m.unanimous && w === idx,
       votes: [counts[idx], counts[1 - idx]],
       points: anon ? null : (m.points?.[idx] ?? 0),
+      ...(m.auto?.[idx] ? { auto: true } : {}),
     };
   }
   if (id in m.votes) return { kind: "voter", pickedWinner: w === null ? null : m.votes[id] === w };

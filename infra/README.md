@@ -98,6 +98,17 @@ az containerapp update -n retrolash -g rg-retrolash --subscription <id> --image 
 - **Saved games** are deleted after 24 h (`roomTtlHours` parameter). Retro answers can contain client or project details, so keep this short.
 - **Remove everything:** `az group delete -n rg-retrolash --subscription <id>` deletes all of it, including saved games.
 
+## Usage numbers
+
+Each game start and finish appends one JSON line to `usage.jsonl` on the file share: player and audience counts, rounds, minutes, language, pack, whether speech and Anonymous mode were on, matchups, auto-answers, kudos and action items. No names, answers or room codes. Console logs disappear when the app scales to zero, so the file is the record. To read it (PowerShell):
+
+```powershell
+$sa  = az storage account list -g rg-retrolash --subscription <id> --query "[0].name" -o tsv
+$key = az storage account keys list -n $sa -g rg-retrolash --subscription <id> --query "[0].value" -o tsv
+az storage file download --account-name $sa --account-key $key --share-name data --path usage.jsonl --dest usage.jsonl
+node scripts/usage.mjs usage.jsonl
+```
+
 ## Known limits
 
 - One replica by design (rooms live in memory). Fine for a handful of simultaneous retros.

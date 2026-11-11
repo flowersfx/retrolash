@@ -480,6 +480,7 @@ function MyResultCard({ view, send }: { view: PlayerView; send: Send }) {
       <h2>{title}</h2>
       <div className="big-score">{t.phone.score(r.votes[0], r.votes[1])}</div>
       {r.points !== null && r.points > 0 && <p className="pts">{t.phone.points(r.points)}</p>}
+      {r.auto && <p className="muted">{t.phone.autoAnswered}</p>}
       <Reactions send={send} />
     </div>
   );

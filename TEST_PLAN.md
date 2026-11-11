@@ -153,6 +153,18 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 10.5 | 🎵 panel → Voice to 0, or toggle off in the lobby | Silent intros, normal timing |
 | 10.6 | Second game with the same prompts | Starts speaking without delay (cached) |
 
+## 11. v0.5
+
+| # | Step | Expected |
+|---|------|----------|
+| 11.1 | Copy the big screen's `/?host=ABCD` URL to another browser or a phone | "This room already has a big screen" with a *Start a new room* button. The original big screen keeps working, also after a reload |
+| 11.2 | Let one player run out the answer timer | Their side shows a 🆘 answer; after the vote the card says *Auto-answer · half points*; their phone says the game answered for them |
+| 11.3 | Two players end on the same score | Scoreboard and podium show the same place for both; joint winners both get a crown and "And the winners are…" |
+| 11.4 | Round intros (English) | The voice says "Round 2. Warm-up!" in a cheerful tone; Swedish uses Sofie's normal voice |
+| 11.5 | Podium with speech on | "And the winner is…" during the drumroll, the winner's name as first place appears |
+| 11.6 | After the last round | *Best of the retro*: up to three answers fly in one by one, clean sweeps marked RETROLASH, authors shown unless Anonymous mode |
+| 11.7 | After a finished game, download `usage.jsonl` (infra README) and run `node scripts/usage.mjs usage.jsonl` | The game is counted; the file has no names or answers |
+
 ## Known gaps to check while testing
 
 - Phone identity is per browser tab (sessionStorage). Closing the tab means rejoining as someone new (5.4).

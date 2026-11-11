@@ -9,7 +9,7 @@ import {
   type CSSProperties,
 } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { joinUrl, useCountdown, useRoom, type RoomEvent } from "./net";
+import { joinUrl, makeCode, useCountdown, useRoom, type RoomEvent } from "./net";
 import { summaryToMarkdown } from "./summary";
 import {
   getVolume,
@@ -25,14 +25,18 @@ import {
   soundReady,
   unlockAudio,
 } from "./sound";
-import { LangContext, REDUCED_MOTION, nextLabel, usePrompts, useT } from "./lang";
+import { LangContext, REDUCED_MOTION, deviceLang, nextLabel, usePrompts, useT } from "./lang";
+import { strings } from "../shared/i18n";
 import {
   FOLLOWUP_OPTIONS,
   LANGS,
   MIN_PLAYERS,
+  HIGHLIGHT_STEP_MS,
   MOODS,
   PACKS,
   PLATE_COLORS,
+  PODIUM_REVEAL,
+  places,
   TOGGLEABLE_ROUNDS,
   autoSprintRounds,
   isHeadToHead,
@@ -107,11 +111,29 @@ function useStaged(view: HostView | null) {
 }
 
 export default function Host({ code }: { code: string }) {
-  const hello = useMemo<ClientMessage>(() => ({ t: "helloHost" }), []);
+  // The first big screen of a room gets a token; keep it so this browser stays the host.
+  const tokenKey = `retrolash:host:${code}`;
+  const hello = useCallback((): ClientMessage => {
+    let token: string | null = null;
+    try {
+      token = localStorage.getItem(tokenKey);
+    } catch {
+      /* private mode: this tab stays host until it closes */
+    }
+    return token ? { t: "helloHost", token } : { t: "helloHost" };
+  }, [tokenKey]);
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
   const nextId = useRef(0);
   const lastPop = useRef(0);
   const onEvent = useCallback((e: RoomEvent) => {
+    if (e.t === "hostToken") {
+      try {
+        localStorage.setItem(tokenKey, e.token);
+      } catch {
+        /* private mode */
+      }
+      return;
+    }
     if (e.t !== "reaction") return;
     const id = nextId.current++;
     setReactions((r) => [...r.slice(-40), { id, emoji: e.emoji, avatar: e.avatar, x: 5 + Math.random() * 90 }]);
@@ -120,8 +142,8 @@ export default function Host({ code }: { code: string }) {
       lastPop.current = Date.now();
       sfx.pop();
     }
-  }, []);
-  const { view, receivedAt, connected, send } = useRoom<HostView>(code, hello, onEvent);
+  }, [tokenKey]);
+  const { view, receivedAt, connected, error, send } = useRoom<HostView>(code, hello, onEvent);
   const seconds = useCountdown(view?.remainingMs, receivedAt);
   const { shown, exiting } = useStaged(view);
 
@@ -162,10 +184,26 @@ export default function Host({ code }: { code: string }) {
   // Spoken prompts: play this screen's clips once, when the screen appears.
   const sayKey = shown?.say?.length ? `${stageKey(shown)}:${shown.phase}:${shown.say.map((c) => c.id).join(",")}` : "";
   useEffect(() => {
-    if (sayKey && shown?.say) void sayClips(shown.say.map((c) => c.url));
+    if (sayKey && shown?.say) void sayClips(shown.say);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sayKey]);
   useMusicMood(shown);
+
+  if (!view && error) {
+    return (
+      <main className="host center">
+        <div className="taken">
+          <div className="logo small">
+            Retro<span>lash</span>
+          </div>
+          <p>{error}</p>
+          <button className="btn big" onClick={() => (location.href = `?host=${makeCode()}`)}>
+            {strings(deviceLang()).host.newRoom}
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   if (!view || !shown) {
     return (
@@ -231,7 +269,7 @@ function HostHeader({
       <div className="logo small">
         Retro<span>lash</span>
       </div>
-      {inGame && view.phase !== "summary" && view.phase !== "podium" && (
+      {inGame && !["summary", "podium", "highlights"].includes(view.phase) && (
         <div className="round-pill" key={view.roundTitle}>
           {t.host.roundPill(view.roundNumber, view.roundCount, view.roundTitle ?? "")}
         </div>
@@ -386,6 +424,8 @@ function Stage({ view, send, msLeft }: { view: HostView; send: Send; msLeft: num
     case "lashVoting":
     case "lashResult":
       return <Lash view={view} />;
+    case "highlights":
+      return <Highlights view={view} />;
     case "podium":
       return <Podium view={view} />;
     case "summary":
@@ -1146,6 +1186,7 @@ function Matchup({
                     )}
                   </div>
                   {author && <Plate p={author} className="author-plate slide-up" />}
+                  {m.auto?.[i] && <div className="auto-tag slide-up">{t.stage.autoAnswer}</div>}
                 </div>
               )}
               {isWinner && <div className="winner-badge">🏆</div>}
@@ -1361,11 +1402,12 @@ function RoundResult({ view }: { view: HostView }) {
 
 function Scoreboard({ players }: { players: PublicPlayer[] }) {
   const max = Math.max(1, ...players.map((p) => p.score));
+  const place = places(players.map((p) => p.score));
   return (
     <ol className="scoreboard">
       {players.map((p, i) => (
-        <li key={p.id} style={{ animationDelay: `${(players.length - i) * 120}ms` }} className={i === 0 ? "leader" : ""}>
-          <span className="rank">{i === 0 ? "👑" : i + 1}</span>
+        <li key={p.id} style={{ animationDelay: `${(players.length - i) * 120}ms` }} className={place[i] === 1 ? "leader" : ""}>
+          <span className="rank">{place[i] === 1 ? "👑" : place[i]}</span>
           <Plate p={p} />
           <span className="score-bar">
             <span style={{ width: `${(p.score / max) * 100}%`, background: p.color }} />
@@ -1383,7 +1425,10 @@ function Scoreboard({ players }: { players: PublicPlayer[] }) {
 function Podium({ view }: { view: HostView }) {
   const t = useT();
   const ranked = view.players.filter((p) => !p.audience).sort((a, b) => b.score - a.score);
+  const place = places(ranked.map((p) => p.score));
   const top = ranked.slice(0, 3);
+  // When the winner's name is spoken, a softer sting keeps the crash from drowning it.
+  const spoken = !!view.say?.length;
   const [shown, setShown] = useState(REDUCED_MOTION ? 3 : 0);
   useEffect(() => {
     if (REDUCED_MOTION) return;
@@ -1392,24 +1437,26 @@ function Podium({ view }: { view: HostView }) {
       at(300, () => sfx.drumroll(0.9)),
       at(1300, () => (setShown(1), sfx.sting())),
       at(2800, () => (setShown(2), sfx.sting())),
-      at(3300, () => sfx.drumroll(1.6)),
-      at(5100, () => (setShown(3), sfx.retrolash())),
+      at(PODIUM_REVEAL.intro, () => sfx.drumroll(1.6)),
+      at(PODIUM_REVEAL.first, () => (setShown(3), spoken ? sfx.fanfare() : sfx.retrolash())),
     ];
     return () => timers.forEach(clearTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // Columns left to right: 2nd, 1st, 3rd. Revealed from 3rd up.
+  // Columns left to right: 2nd, 1st, 3rd, revealed from 3rd up. Equal scores share a place.
   const slots = [
-    { p: top[1], place: 2, visible: shown >= 2 },
-    { p: top[0], place: 1, visible: shown >= 3 },
-    { p: top[2], place: 3, visible: shown >= 1 },
+    { p: top[1], place: place[1], visible: shown >= 2 },
+    { p: top[0], place: place[0], visible: shown >= 3 },
+    { p: top[2], place: place[2], visible: shown >= 1 },
   ];
+  const jointWinners = place.filter((x) => x === 1).length > 1;
   return (
     <div className="podium-stage">
-      <h1 className="huge drop-in">{t.stage.podium}</h1>
+      <h1 className="huge drop-in">{jointWinners ? t.stage.podiumTie : t.stage.podium}</h1>
       <div className="podium">
-        {slots.map(({ p, place, visible }) =>
+        {slots.map(({ p, place, visible }, slot) =>
           p ? (
-            <div key={place} className={`podium-col place-${place} ${visible ? "up" : ""}`}>
+            <div key={slot} className={`podium-col place-${Math.min(place, 3)} ${visible ? "up" : ""}`}>
               {visible && (
                 <div className="podium-winner">
                   {place === 1 && <div className="crown">👑</div>}
@@ -1424,20 +1471,62 @@ function Podium({ view }: { view: HostView }) {
               </div>
             </div>
           ) : (
-            <div key={place} className="podium-col empty" />
+            <div key={slot} className="podium-col empty" />
           ),
         )}
       </div>
       {shown >= 3 && ranked.length > 3 && (
-        <ol className="podium-rest" start={4}>
-          {ranked.slice(3).map((p) => (
+        <ol className="podium-rest">
+          {ranked.slice(3).map((p, i) => (
             <li key={p.id}>
-              <Plate p={p} /> {p.score}
+              <span className="rest-place">{place[i + 3]}.</span> <Plate p={p} /> {p.score}
             </li>
           ))}
         </ol>
       )}
       {shown >= 3 && <Confetti count={200} />}
+    </div>
+  );
+}
+
+/** The game's best answers, one card at a time, before the podium. */
+function Highlights({ view }: { view: HostView }) {
+  const t = useT();
+  const items = view.highlights ?? [];
+  const [shown, setShown] = useState(REDUCED_MOTION ? items.length : 0);
+  useEffect(() => {
+    const timers = items.map((_, i) =>
+      setTimeout(() => {
+        setShown(i + 1);
+        sfx.whoosh();
+        if (i === items.length - 1) sfx.fanfare(0.2);
+        else sfx.sting(0.2);
+      }, 900 + i * HIGHLIGHT_STEP_MS),
+    );
+    return () => timers.forEach(clearTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div className="highlights">
+      <h1 className="huge drop-in">{t.stage.highlights}</h1>
+      <div className="hl-row">
+        {items.map((h, i) => (
+          <article
+            key={i}
+            className={`hl-card ${i < shown ? "in" : ""} ${h.unanimous ? "lash" : ""}`}
+            style={{ "--tilt": `${(i - 1) * 2}deg` } as CSSProperties}
+          >
+            <span className="hl-round">{h.round}</span>
+            <p className="hl-prompt">{h.prompt}</p>
+            <p className={`hl-answer ${h.emoji ? "emoji-answer" : ""}`}>{h.answer}</p>
+            <div className="hl-foot">
+              <span className="hl-votes">{t.stage.highlightVotes(h.votes, h.total)}</span>
+              {h.unanimous && <span className="hl-badge">{t.stage.retrolash}</span>}
+            </div>
+            {h.author && <Plate p={h.author} className="hl-author" />}
+          </article>
+        ))}
+      </div>
     </div>
   );
 }

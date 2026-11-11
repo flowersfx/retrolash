@@ -12,7 +12,7 @@ A Quiplash-style party game for Scrum retrospectives. The meeting-room screen ho
 6. **The Sprint.** Head-to-head with retro prompts ("The thing that slowed us down the most", "If this sprint was a movie…"). It's played over at least two rounds (three with only three players), and later rounds score more. After each matchup there's a discussion pause with a talking point and a 60-second timer. Pick a **Sprint format** in the lobby to use prompts after a classic retro format: Start · Stop · Continue, 4Ls, Sailboat, or Mad · Sad · Glad.
 7. **Kudos.** Everyone writes an anonymous shout-out to a teammate (or the whole team). The notes land on the big screen one by one.
 8. **Last Lash: Action Items.** Everyone answers the same prompt (default: *"One concrete thing we should change next sprint"*), with up to 2 ideas each, then gets 3 votes. On the results screen people tap **I'll take it** on their phone to own an item.
-9. **Podium.** Third place, second place, a drumroll, then the winner with a crown and confetti. Skipped in Anonymous mode.
+9. **Highlights and podium.** The three best answers of the game come back one by one. Then third place, second place, a drumroll and the winner with a crown and confetti (equal scores share a place). The podium is skipped in Anonymous mode.
 10. **Summary.** Action items with owners, the sprint weather, the follow-up results, kudos, every sprint answer with its votes, and the scores. *Copy as Markdown* pastes into Confluence, Jira or Slack; *Download .md* saves it. Next time, paste that Markdown into the lobby to run *Did we do it?*.
 
 Everything up to the Last Lash results moves on by itself on timers, so the game keeps going even if the facilitator gets pulled into the discussion. The Last Lash results and the summary wait for the facilitator.
@@ -33,12 +33,14 @@ Someone dropping in mid-retro (a PO, a manager) can tap **Join as audience** on 
 - Win streaks ("Hat trick!"), comebacks from last place and lead changes get called out.
 - The Last Lash results reveal from the bottom up with a drumroll.
 - A small QR code in the header lets latecomers join mid-game.
-- **Spoken prompts:** with Azure AI Speech set up (see [infra/README.md](infra/README.md)), the big screen reads round titles and prompts aloud in English or Swedish, and the intros stretch to fit. Toggle it in the lobby; the 🎵 panel has a voice volume. Without Speech the game simply runs silent.
+- **Spoken prompts:** the voice announces each round ("Round 3. The Sprint!"), reads the prompts and names the winner on the podium. With Azure AI Speech set up (see [infra/README.md](infra/README.md)), the big screen reads round titles and prompts aloud in English or Swedish, and the intros stretch to fit. Toggle it in the lobby; the 🎵 panel has a voice volume. Without Speech the game simply runs silent.
 - Sound effects and a background music loop are generated in the browser. 🔊 mutes everything; 🎵 opens music on/off and separate volume sliders for music and sound effects (remembered in the browser). Browsers only allow sound after the first click or key press on the page.
 - Players can tap emoji reactions on their phone while they wait. The reactions float up on the big screen.
-- A 🆘 *Help me* button on the phone fills in a ready-made silly answer when someone is stuck.
+- A 🆘 *Help me* button on the phone fills in a ready-made silly answer when someone is stuck. If a player runs out of time, the game answers for them the same way, so no matchup is a walkover. An auto-answer is marked on the card after the vote and earns half points.
 
 ### Facilitator controls (big screen)
+
+- The browser that opens a room first becomes its big screen and keeps a secret for it. Another browser opening `/?host=<code>` is turned away, so players who see the room code can't take over. On another laptop, start a new room, or make someone VIP to run the game from a phone.
 
 - **Space**, **→** or **Page Down** advances or skips the timer, presenter-clicker style.
 - **P** holds the timer (for a longer discussion) and resumes it.

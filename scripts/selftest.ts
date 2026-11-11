@@ -1,6 +1,7 @@
 // Quick checks for the pure helpers in shared/. Run: npx tsx scripts/selftest.ts
 import assert from "node:assert/strict";
-import { DEFAULT_SETTINGS, PACKS, emojiOnly, parsePreviousItems, planRounds } from "../shared/types";
+import { DEFAULT_SETTINGS, PACKS, emojiOnly, parsePreviousItems, places, planRounds } from "../shared/types";
+import { GameRoom, type Connection, type Room } from "../server/game";
 import { prompts, sprintPrompts } from "../shared/prompts";
 import { titledPlan } from "../shared/i18n";
 import { mkdtempSync } from "node:fs";
@@ -71,4 +72,73 @@ assert.notEqual(speech.id(line), speech.id({ ...line, lang: "sv" }), "voice is p
 assert.ok(speech.file(clip.url), "serves its own clip");
 assert.equal(speech.file("/tts/lib/" + "a".repeat(32) + ".mp3"), null, "unknown clip");
 assert.equal(speech.file("/tts/lib/../../etc/passwd"), null, "traversal");
+// Shared places.
+assert.deepEqual(places([3450, 3450, 2000, 2000, 10]), [1, 1, 3, 3, 5]);
+
+// A small in-memory game: host token, auto-answers and their half points.
+class FakeConn implements Connection {
+  state: unknown = undefined;
+  sent: { t: string; [k: string]: unknown }[] = [];
+  constructor(readonly id: string) {}
+  setState(s: unknown) {
+    this.state = s;
+  }
+  send(data: string) {
+    this.sent.push(JSON.parse(data));
+  }
+}
+const conns: FakeConn[] = [];
+const fakeRoom: Room = { id: "unit", storage: { get: async () => undefined, put: async () => {} }, getConnections: () => conns };
+const game = new GameRoom(fakeRoom);
+await game.onStart();
+const connect = (id: string) => {
+  const c = new FakeConn(id);
+  conns.push(c);
+  game.onConnect(c);
+  return c;
+};
+const say = (c: FakeConn, m: object) => game.onMessage(JSON.stringify(m), c);
+
+const host = connect("host-1");
+say(host, { t: "helloHost" });
+const token = host.sent.find((m) => m.t === "hostToken")?.token as string;
+assert.ok(/^[a-f0-9]{48}$/.test(token ?? ""), "first big screen gets a token");
+const intruder = connect("host-2");
+say(intruder, { t: "helloHost" });
+assert.equal(intruder.sent.at(-1)?.t, "error", "a second big screen without the token is refused");
+assert.equal(intruder.state, undefined, "and gets no host role");
+say(intruder, { t: "helloHost", token: "a".repeat(48) });
+assert.equal(intruder.sent.at(-1)?.t, "error", "a wrong token is refused");
+const same = connect("host-3");
+say(same, { t: "helloHost", token });
+assert.equal(same.sent.at(-1)?.t, "view", "the right token gets the host view");
+assert.ok(!JSON.stringify(game.hostView()).includes(token), "the token never appears in a view");
+
+const players = ["a", "b", "c"].map((id) => {
+  const c = connect(id);
+  say(c, { t: "helloPlayer", name: id.toUpperCase() });
+  return c;
+});
+say(host, { t: "settings", settings: { rounds: ["warmup"] } });
+say(host, { t: "start" });
+assert.equal(game.state.phase, "roundIntro");
+game.advance(); // answering
+const round = game.state.rounds[0];
+for (const m of round.matchups.filter((x) => x.playerIds.includes("a")))
+  say(players[0], { t: "answer", matchupId: m.id, text: "A real answer" });
+game.advance(); // time's up: fill in, then the first playable matchup
+assert.equal(round.matchups.filter((m) => m.auto).length, 2, "both of a's opponents got an auto-answer");
+assert.equal(round.matchups.filter((m) => m.answers.every((x) => x === null)).length, 1, "the matchup nobody answered stays empty");
+assert.equal(game.state.phase, "matchupIntro");
+const m = round.matchups[game.state.matchupIndex];
+assert.ok(m.auto && m.answers.every((x) => x !== null), "the played matchup has a real and an auto answer");
+game.advance(); // voting
+const autoSide = m.auto![0] ? 0 : 1;
+const voter = players.find((p) => !m.playerIds.includes(p.id))!;
+say(voter, { t: "vote", matchupId: m.id, choice: autoSide });
+assert.equal(game.state.phase, "matchupResult", "the only voter closes the vote");
+assert.deepEqual(m.points, autoSide === 0 ? [50, 0] : [0, 50], "an auto-answer earns half its vote points and no win bonus");
+assert.equal(game.hostView().matchup?.auto?.[autoSide], true, "the big screen sees which side was automatic");
+game.dispose();
+
 console.log("selftest OK");

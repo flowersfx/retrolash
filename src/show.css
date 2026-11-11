@@ -295,3 +295,30 @@
 .vol-row b { text-align: right; font-variant-numeric: tabular-nums; }
 .vol-row.dim { opacity: 0.45; }
 .vol-panel .small-print { text-align: left; }
+
+/* ---------- v0.5 ---------- */
+.taken { display: flex; flex-direction: column; align-items: center; gap: 1.2em; text-align: center; max-width: 34em; font-size: 1.2em; }
+.taken p { margin: 0; color: var(--muted); }
+.auto-tag { margin-top: 0.4em; font-size: 0.85em; font-weight: 700; opacity: 0.75; }
+.rest-place { font-family: var(--display); color: var(--muted); }
+
+.highlights { display: flex; flex-direction: column; align-items: center; gap: 1.6em; }
+.hl-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(18em, 1fr)); gap: 1.6em; width: min(84em, 100%); align-items: start; }
+.hl-card {
+  position: relative; display: flex; flex-direction: column; gap: 0.7em;
+  background: var(--panel); border-radius: var(--radius); padding: 1.4em 1.5em 1.6em;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+  visibility: hidden; transform: rotate(var(--tilt));
+}
+.hl-card.in { visibility: visible; animation: hlIn 0.75s cubic-bezier(.2,1.4,.4,1) both; }
+@keyframes hlIn { from { transform: translateY(40vh) rotate(calc(var(--tilt) * -4)) scale(0.6); opacity: 0; } }
+.hl-card.lash { box-shadow: 0 0 0 4px var(--a), 0 14px 40px rgba(0, 0, 0, 0.35); }
+.hl-round { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 700; }
+.hl-prompt { margin: 0; color: var(--muted); font-weight: 600; }
+.hl-answer { margin: 0; font-family: var(--display); font-weight: 800; font-size: 2em; line-height: 1.15; text-wrap: balance; }
+.hl-answer.emoji-answer { font-size: 2.8em; }
+.hl-foot { display: flex; align-items: center; gap: 0.7em; flex-wrap: wrap; }
+.hl-votes { font-weight: 700; color: var(--c); }
+.hl-badge { background: var(--a); color: #2a1600; font-family: var(--display); font-weight: 800; border-radius: 999px; padding: 0.15em 0.7em; font-size: 0.85em; }
+.hl-author { align-self: flex-start; font-size: 1.05em; }
+.host.center { grid-template-rows: 1fr; }

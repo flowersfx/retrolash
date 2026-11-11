@@ -336,16 +336,26 @@ function loadClip(url: string): Promise<AudioBuffer | null> {
   return p;
 }
 
-/** Say these clips in order. A new call interrupts the previous one. */
-export async function sayClips(urls: string[]) {
+/**
+ * Say these clips in order. A clip with `at` waits until that many ms after the
+ * call (e.g. the winner's name as first place appears). A new call interrupts.
+ */
+export async function sayClips(clips: { url: string; at?: number }[]) {
   const c = audio();
-  if (!c || !voiceBus || volume.voice === 0 || urls.length === 0) return;
+  if (!c || !voiceBus || volume.voice === 0 || clips.length === 0) return;
   stopVoice();
   const token = voiceToken;
-  for (const url of urls) {
-    const buf = await loadClip(url);
+  const t0 = performance.now();
+  clips.forEach((clip) => void loadClip(clip.url)); // fetch all now, so later ones are ready on time
+  for (const clip of clips) {
+    const buf = await loadClip(clip.url);
     if (token !== voiceToken) return;
     if (!buf) continue;
+    if (clip.at !== undefined) {
+      const wait = clip.at - (performance.now() - t0);
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      if (token !== voiceToken) return;
+    }
     duck(buf.duration + 0.6);
     await new Promise<void>((resolve) => {
       const src = c.createBufferSource();

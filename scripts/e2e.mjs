@@ -7,20 +7,22 @@
 //
 //   npm run build && node scripts/e2e.mjs [en|sv]
 import { spawn } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 const LANG = process.argv[2] ?? "sv";
 const PORT = 2990 + Math.floor(Math.random() * 9);
 const CODE = "ZQXE";
+const DATA_DIR = mkdtempSync(path.join(tmpdir(), "retrolash-e2e-"));
+let hostToken = null;
 const fail = (msg) => {
   console.error(`E2E FAIL: ${msg}`);
   process.exit(1);
 };
 
 const server = spawn(process.execPath, ["dist-server/main.js"], {
-  env: { ...process.env, PORT: String(PORT), TIME_SCALE: "0.1", TTS_FAKE: "1", DATA_DIR: mkdtempSync(path.join(tmpdir(), "retrolash-e2e-")) },
+  env: { ...process.env, PORT: String(PORT), TIME_SCALE: "0.1", TTS_FAKE: "1", DATA_DIR },
   stdio: ["ignore", "ignore", "inherit"],
 });
 const bots = () =>
@@ -79,6 +81,7 @@ const spokenPhases = new Set();
 let clipUrl = null;
 ws.onmessage = (e) => {
   const msg = JSON.parse(e.data);
+  if (msg.t === "hostToken") hostToken = msg.token;
   if (msg.t !== "view") return;
   const v = msg.view;
   const key = `${v.phase}|${v.roundTitle ?? ""}|${v.matchupNumber ?? ""}`;
@@ -110,7 +113,7 @@ ws.onmessage = (e) => {
 async function check(v) {
   if (!started) fail("game never started (VIP start didn't work?)");
   if (vipPresses !== 1) fail(`expected the VIP to press next once, got ${vipPresses}`);
-  for (const p of ["matchupIntro", "podium"]) if (!phases.includes(p)) fail(`never saw phase ${p}`);
+  for (const p of ["matchupIntro", "highlights", "podium"]) if (!phases.includes(p)) fail(`never saw phase ${p}`);
   const kinds = v.summary.map((r) => r.kind);
   const sprints = kinds.filter((k) => k === "retro").length;
   if (sprints < 2) fail(`expected >= 2 Sprint rounds, got ${sprints}`);
@@ -143,6 +146,28 @@ async function check(v) {
     if (r.status !== 404) fail(`${bad} should be 404, got ${r.status}`);
   }
   console.log(`speech: clips on ${[...spokenPhases].join(", ")}`);
+
+  // Only the first big screen (or one with its token) may host.
+  const hostHello = (token) =>
+    new Promise((resolve) => {
+      const s = new WebSocket(url(`second-screen-${token ? "ok" : "no"}`));
+      s.onopen = () => s.send(JSON.stringify(token ? { t: "helloHost", token } : { t: "helloHost" }));
+      s.onmessage = (ev) => {
+        resolve(JSON.parse(ev.data).t);
+        s.close();
+      };
+    });
+  if (!hostToken) fail("the big screen never got a host token");
+  if ((await hostHello(null)) !== "error") fail("a second big screen without the token was let in");
+  if ((await hostHello(hostToken)) !== "view") fail("the big screen's token was refused");
+
+  // Usage numbers: one finished game with 4 players, and no names in the file.
+  await new Promise((r) => setTimeout(r, 300));
+  const usage = readFileSync(path.join(DATA_DIR, "usage.jsonl"), "utf8");
+  const games = usage.trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.event === "game");
+  if (games.length !== 1 || games[0].players !== 4) fail(`usage file wrong: ${usage}`);
+  if (/Ada|Linus|Grace|PO 1/.test(usage)) fail("usage file contains names");
+  console.log(`usage: ${JSON.stringify(games[0])}`);
   console.log(`\nE2E OK (${LANG}) in ${((Date.now() - t0) / 1000).toFixed(1)}s: ${phases.length} screens, ${vipPresses} VIP press, ${sprints} Sprint rounds, ${kudos.length} kudos`);
   process.exit(0);
 }

@@ -27,6 +27,8 @@ export interface SpeechConfig {
   region?: string;
   key?: string;
   voices: Record<Lang, string>;
+  /** Speaking style per language, e.g. "cheerful" (only for voices that support it). */
+  styles?: Partial<Record<Lang, string>>;
   /** Test hook: write fake clips instead of calling Azure. */
   fake?: boolean;
   log: (...args: unknown[]) => void;
@@ -60,7 +62,10 @@ export class AzureSpeech implements Speech {
 
   id(line: SpeechLine) {
     const voice = this.cfg.voices[line.lang] ?? this.cfg.voices.en;
-    const hash = createHash("sha256").update(`${voice}|${FORMAT}|${line.text}`).digest("hex").slice(0, 32);
+    const style = this.cfg.styles?.[line.lang];
+    // The style is part of the id only when set, so unstyled clips keep their cache.
+    const key = `${voice}|${FORMAT}|${style ? `${style}|` : ""}${line.text}`;
+    const hash = createHash("sha256").update(key).digest("hex").slice(0, 32);
     return `${line.scope}/${hash}`;
   }
 
@@ -139,9 +144,13 @@ export class AzureSpeech implements Speech {
   private async callAzure(line: SpeechLine): Promise<Buffer> {
     const voice = this.cfg.voices[line.lang] ?? this.cfg.voices.en;
     const xmlLang = voice.split("-").slice(0, 2).join("-");
+    const style = this.cfg.styles?.[line.lang];
+    const body = `<prosody rate="+4%">${escapeXml(line.text)}</prosody>`;
     const ssml =
-      `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${xmlLang}">` +
-      `<voice name="${voice}"><prosody rate="+4%">${escapeXml(line.text)}</prosody></voice></speak>`;
+      `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="${xmlLang}">` +
+      `<voice name="${voice}">` +
+      (style ? `<mstts:express-as style="${escapeXml(style)}">${body}</mstts:express-as>` : body) +
+      `</voice></speak>`;
     for (let attempt = 0; ; attempt++) {
       const res = await fetch(`https://${this.cfg.region}.tts.speech.microsoft.com/cognitiveservices/v1`, {
         method: "POST",

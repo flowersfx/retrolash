@@ -59,7 +59,8 @@ export type RoomEvent = Exclude<ServerMessage, { t: "view" } | { t: "error" }>;
 
 export function useRoom<V extends View>(
   code: string | null,
-  hello: ClientMessage | null,
+  /** Sent on every (re)connect. A function is called each time, so it can read fresh state (the host token). */
+  hello: ClientMessage | (() => ClientMessage) | null,
   onEvent?: (e: RoomEvent) => void,
 ) {
   const [view, setView] = useState<V | null>(null);
@@ -71,7 +72,7 @@ export function useRoom<V extends View>(
   helloRef.current = hello;
   const eventRef = useRef(onEvent);
   eventRef.current = onEvent;
-  const helloKey = hello ? JSON.stringify(hello) : null;
+  const helloKey = typeof hello === "function" ? "fn" : hello ? JSON.stringify(hello) : null;
 
   useEffect(() => {
     if (!code || !helloKey) return;
@@ -83,7 +84,9 @@ export function useRoom<V extends View>(
     socketRef.current = ws;
     const onOpen = () => {
       setConnected(true);
-      if (helloRef.current) ws.send(JSON.stringify(helloRef.current));
+      const h = helloRef.current;
+      const msg = typeof h === "function" ? h() : h;
+      if (msg) ws.send(JSON.stringify(msg));
     };
     const onClose = () => setConnected(false);
     const onMessage = (e: MessageEvent) => {

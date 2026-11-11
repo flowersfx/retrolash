@@ -107,6 +107,7 @@ export type Phase =
   | "pollResult"
   | "lashVoting"
   | "lashResult"
+  | "highlights"
   | "podium"
   | "summary";
 
@@ -165,6 +166,8 @@ export interface MatchupView {
   /** Points awarded per side, only in non-anonymous mode. */
   points?: [number, number];
   unanimous?: boolean;
+  /** Sides answered automatically after the timer ran out (shown after the vote). */
+  auto?: [boolean, boolean];
   /** A streak or comeback worth shouting about (non-anonymous only). */
   callout?: Callout;
 }
@@ -256,6 +259,8 @@ export interface HostView {
   speechAvailable: boolean;
   /** Clips the big screen should play for this screen, in order. */
   say?: SpokenClip[];
+  /** highlights: the game's best answers. */
+  highlights?: HighlightView[];
   summary?: SummaryRound[];
 }
 
@@ -264,6 +269,30 @@ export interface SpokenClip {
   id: string;
   url: string;
   ms: number;
+  /** Start this many ms after the screen appears (default: right after the previous clip). */
+  at?: number;
+}
+
+/** One of the game's best answers, replayed before the podium. */
+export interface HighlightView {
+  prompt: string;
+  answer: string;
+  votes: number;
+  total: number;
+  unanimous: boolean;
+  round: string;
+  emoji: boolean;
+  /** Who wrote it, outside anonymous mode. */
+  author?: VoterView | null;
+}
+
+/** Big-screen timing the server also needs: when the podium reveals its parts, and the highlight cards. */
+export const PODIUM_REVEAL = { intro: 3300, first: 5100 } as const;
+export const HIGHLIGHT_STEP_MS = 3200;
+
+/** Competition ranking (1, 2, 2, 4): equal scores share a place. */
+export function places(scores: number[]): number[] {
+  return scores.map((s) => 1 + scores.filter((x) => x > s).length);
 }
 
 export interface PromptTask {
@@ -283,6 +312,8 @@ export type MyResult =
       votes: [number, number];
       /** null in anonymous mode. */
       points: number | null;
+      /** The timer ran out and the game answered for me. */
+      auto?: boolean;
     }
   | { kind: "voter"; pickedWinner: boolean | null };
 
@@ -355,10 +386,12 @@ export type ServerMessage =
   | { t: "view"; view: HostView | PlayerView }
   | { t: "error"; message: string }
   /** Sent to the big screen only. */
-  | { t: "reaction"; emoji: string; avatar?: string };
+  | { t: "reaction"; emoji: string; avatar?: string }
+  /** To the first big screen of a room: keep this to reconnect as the host. */
+  | { t: "hostToken"; token: string };
 
 export type ClientMessage =
-  | { t: "helloHost" }
+  | { t: "helloHost"; token?: string }
   | { t: "helloPlayer"; name: string; audience?: boolean; avatar?: string; color?: string }
   | { t: "profile"; avatar: string; color: string }
   | { t: "settings"; settings: Partial<Settings> }

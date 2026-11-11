@@ -26,6 +26,7 @@ const en = {
     audienceFull: "The audience is full.",
     gameFull: "This game is full. You can still join as audience.",
     kicked: "You were removed from the room.",
+    hostTaken: "This room already has a big screen. Open it from the browser that started it, or start a new room.",
   },
   next: {
     skipTimer: "Skip timer",
@@ -35,6 +36,7 @@ const en = {
     nextRound: "Next round",
     showSummary: "Show summary",
     showPodium: "Show the winners",
+    finishGame: "Finish the game",
     next: "Next",
   },
   hold: "⏸ Hold",
@@ -58,6 +60,7 @@ const en = {
     music: "Music",
     effects: "Sound effects",
     voice: "Voice",
+    newRoom: "Start a new room",
   },
   blurbs: {
     checkin: "Quick weather report: how did this sprint feel? Pick one on your phone. It's anonymous.",
@@ -136,6 +139,10 @@ const en = {
     pickFavs: "Pick your favourites on your phone",
     volunteer: "🙋 Volunteer on your phone to own an action item",
     podium: "And the winner is…",
+    podiumTie: "And the winners are…",
+    highlights: "Best of the retro",
+    highlightVotes: (n: number, total: number) => `${n} of ${total} votes`,
+    autoAnswer: "🆘 Auto-answer · half points",
     wrap: "That's a wrap 🎬",
     actionItems: "Action items",
     noActions: "No action items this time.",
@@ -225,7 +232,14 @@ const en = {
     pickedWinner: "You picked the winner ✓",
     pickedLoser: "The room disagreed with you 🙃",
     tieVoter: "It's a tie!",
+    autoAnswered: "Time ran out, so we answered for you 🆘",
     remote: "🎛️ Remote control",
+  },
+  spoken: {
+    round: (n: number, title: string) => `Round ${n}. ${title}!`,
+    highlights: "Here are the best answers of the day!",
+    winnerIntro: (many: boolean): string => (many ? "And the winners are…" : "And the winner is…"),
+    winners: (names: string[]) => `${joinNames(names, "and")}!`,
   },
   md: {
     title: (date: string) => `Retro ${date}`,
@@ -238,6 +252,7 @@ const en = {
     kudos: "Kudos",
     toTeam: "The whole team",
     scores: "Scores",
+    auto: "auto-answer",
   },
 };
 
@@ -268,6 +283,7 @@ const sv: Strings = {
     audienceFull: "Publiken är full.",
     gameFull: "Spelet är fullt. Du kan fortfarande gå med som publik.",
     kicked: "Du togs bort från rummet.",
+    hostTaken: "Det här rummet har redan en storskärm. Öppna det från webbläsaren som startade det, eller starta ett nytt rum.",
   },
   next: {
     skipTimer: "Hoppa över timern",
@@ -277,6 +293,7 @@ const sv: Strings = {
     nextRound: "Nästa runda",
     showSummary: "Visa sammanfattning",
     showPodium: "Visa vinnarna",
+    finishGame: "Avsluta spelet",
     next: "Nästa",
   },
   hold: "⏸ Pausa",
@@ -300,6 +317,7 @@ const sv: Strings = {
     music: "Musik",
     effects: "Ljudeffekter",
     voice: "Röst",
+    newRoom: "Starta ett nytt rum",
   },
   blurbs: {
     checkin: "Snabb väderrapport: hur kändes sprinten? Välj på telefonen. Det är anonymt.",
@@ -378,6 +396,10 @@ const sv: Strings = {
     pickFavs: "Välj dina favoriter på telefonen",
     volunteer: "🙋 Anmäl dig på telefonen för att äga en åtgärd",
     podium: "Och vinnaren är…",
+    podiumTie: "Och vinnarna är…",
+    highlights: "Det bästa från retron",
+    highlightVotes: (n, total) => `${n} av ${total} röster`,
+    autoAnswer: "🆘 Autosvar · halva poäng",
     wrap: "Det var allt för den här gången 🎬",
     actionItems: "Åtgärder",
     noActions: "Inga åtgärder den här gången.",
@@ -467,7 +489,14 @@ const sv: Strings = {
     pickedWinner: "Du valde vinnaren ✓",
     pickedLoser: "Rummet höll inte med dig 🙃",
     tieVoter: "Oavgjort!",
+    autoAnswered: "Tiden tog slut, så vi svarade åt dig 🆘",
     remote: "🎛️ Fjärrkontroll",
+  },
+  spoken: {
+    round: (n, title) => `Runda ${n}. ${title}!`,
+    highlights: "Här är dagens bästa svar!",
+    winnerIntro: (many) => (many ? "Och vinnarna är…" : "Och vinnaren är…"),
+    winners: (names) => `${joinNames(names, "och")}!`,
   },
   md: {
     title: (date) => `Retro ${date}`,
@@ -480,10 +509,21 @@ const sv: Strings = {
     kudos: "Kudos",
     toTeam: "Hela teamet",
     scores: "Poäng",
+    auto: "autosvar",
   },
 };
 
 const STRINGS: Record<Lang, Strings> = { en, sv };
+
+/** "A", "A and B", "A, B and C". */
+function joinNames(names: string[], and: string) {
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} ${and} ${names[names.length - 1]}` : (names[0] ?? "");
+}
+
+/** A round title as it should be read aloud ("The Sprint · part 2" → "The Sprint, part 2"). */
+export function spokenTitle(title: string) {
+  return title.replace(/\s+·\s+/g, ", ");
+}
 
 export function strings(lang: Lang | undefined): Strings {
   return STRINGS[lang ?? "en"] ?? en;

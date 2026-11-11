@@ -24,6 +24,10 @@ Quiplash-style party game for Scrum retrospectives. The big meeting-room screen 
 - Summary exports Markdown (copy / download) so outcomes can go to Jira/Confluence/Slack.
 - Min 3 players, max 16. Each player gets 2 prompts per head-to-head round (circular pairing).
 - The server sends each connection a tailored view (`HostView` / `PlayerView`); never broadcast secret state.
+- **Host token:** the first `helloHost` of a room gets `{t:"hostToken"}` (48 hex chars, stored in that browser's localStorage); only its SHA-256 is saved in the game state. Later big screens must present it or get an error. Survives restart. `useRoom` accepts a hello *function* so reconnects send the stored token.
+- Missed answers: when exactly one side of a matchup is empty at time-up, `fillMissing` puts a 🆘 quip there (`auto` flag): half vote points, no win bonus, no streak, excluded from highlights. Both empty → matchup skipped.
+- End of game: last round → **highlights** (top 3 winning answers, clean sweeps first) → **podium** (shared places via `places()`; the voice says "And the winner is…" then the name(s), timed by `PODIUM_REVEAL`) → summary. Speech lines can carry `at` (ms after the screen appears).
+- Usage: `GameRoom` reports start/finish counts to `onUsage`; `server/main.ts` appends them to `DATA_DIR/usage.jsonl` (no names or content); `scripts/usage.mjs` summarises.
 - State is persisted in room storage; phones keep identity per browser tab (sessionStorage device id passed as PartySocket `id`), and remember the last identity per room in localStorage (12 h) so a closed tab can "Continue as …".
 
 ## Dev
@@ -42,6 +46,7 @@ Quiplash-style party game for Scrum retrospectives. The big meeting-room screen 
 - v0.4 (built and deployed 2026-11-10 as image `ff8d194`, revision `retrolash--0000002`; live smoke test in Swedish with bots + audience passed; not yet tested with humans): matchup intros, card exits, RETROLASH animation, name plates, podium + confetti, corner QR, streak callouts, music, avatar/colour picker, phone results, rejoin, VIP remote, Kudos round, Sprint packs, Swedish. Test plan section 9.
 - Spoken prompts deployed 2026-11-10: shared lab Speech `speech-lab-szxyd4hczkgyk` (F0, Sweden Central) in `rg-lab-shared`; Retrolash revision `retrolash--0000004` (image `556a619`) has the `speech-key` secret; voices are `sv-SE-SofieNeural` and `en-US-JennyNeural` (Bicep params `speechVoiceSv`/`speechVoiceEn`; alternatives Hillevi, Aria, Ava). Live smoke test: real Swedish clips on round and matchup intros, no synthesis failures. Not yet heard in a room. When running `az` from Git Bash, set `MSYS_NO_PATHCONV=1`, or resource ids starting with `/subscriptions` get mangled into Windows paths (`deploy.ps1` in PowerShell is unaffected).
 - Custom domain live 2026-11-11: https://retrolash.flowersfx.com (CNAME + `asuid` TXT in the flowersfx.com zone on Dyn; managed certificate `mc-retrolash-env-retrolash-flower-9754`, auto-renewed). Verified: HTTPS, HTTP→HTTPS redirect, WSS game with bots, voice clips. `deploy.ps1` passes the live `customDomains` back into the template; a redeploy without that would remove the binding (proved with what-if). The Valtech VPN intercepts DNS, so check records without it or via DNS over HTTPS.
+- v0.5 (built 2026-11-11): host token, auto-answers, shared places, cheerful English voice + spoken round lines + winner announcement, highlights reel, usage file. Test plan section 11.
 - Display font (Bricolage Grotesque via Google Fonts) hasn't been seen rendered yet.
 
 ## Ideas not yet built
