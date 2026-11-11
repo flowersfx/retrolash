@@ -26,6 +26,9 @@ param roomTtlHours int = 24
 @description('Resource id of a shared Azure AI Speech account for spoken prompts. Empty = no speech.')
 param speechResourceId string = ''
 
+@description('Custom domains bound to the app, e.g. [{ name, certificateId, bindingType }]. deploy.ps1 passes the current ones through, so a redeploy never drops them. Add new ones with az containerapp hostname add/bind (managed certificate).')
+param customDomains array = []
+
 @description('Neural voices for the two languages.')
 param speechVoiceEn string = 'en-US-JennyNeural'
 param speechVoiceSv string = 'sv-SE-SofieNeural'
@@ -121,6 +124,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
         targetPort: 8080
         transport: 'auto' // HTTP/1.1 with WebSocket upgrade
         allowInsecure: false
+        customDomains: customDomains
       }
     }
     template: {

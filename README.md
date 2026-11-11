@@ -74,7 +74,7 @@ node scripts/bots.mjs ABCD 4 retrolash.<env>.swedencentral.azurecontainerapps.io
 
 ## Deploy (Azure Container Apps)
 
-One container serves both the web app and the game server, on one URL. It scales to zero when nobody is playing, so the expected cost for a few retros a month is close to zero. See [infra/README.md](infra/README.md) for the full setup, costs and how GitHub Actions rolls out new versions.
+Live at **https://retrolash.flowersfx.com**. One container serves both the web app and the game server, on one URL. It scales to zero when nobody is playing, so the expected cost for a few retros a month is close to zero. See [infra/README.md](infra/README.md) for the full setup, costs and how GitHub Actions rolls out new versions.
 
 Short version:
 

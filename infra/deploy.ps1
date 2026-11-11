@@ -61,7 +61,25 @@ if (-not $NoSpeech) {
 Write-Host "Speech       : $(if ($speechId) { $speechId.Split('/')[-1] } else { 'off' })"
 Write-Host ''
 
-$params = @("image=$Image", "minReplicas=$MinReplicas", "speechResourceId=$speechId")
+# Custom domains are bound outside the template (managed certificates), so pass the
+# current bindings through; otherwise this redeploy would remove them.
+$domains = '[]'
+$appExists = (Invoke-Az resource list -g $ResourceGroup --subscription $SubscriptionId `
+  --resource-type Microsoft.App/containerApps --query "[?name=='retrolash'] | length(@)" -o tsv) -ne '0'
+if ($appExists) {
+  $current = Invoke-Az containerapp show -n retrolash -g $ResourceGroup --subscription $SubscriptionId `
+    --query 'properties.configuration.ingress.customDomains' -o json
+  if ($current -and $current.Trim() -ne 'null') { $domains = $current }
+}
+$domainNames = ($domains | ConvertFrom-Json | ForEach-Object { $_.name }) -join ', '
+Write-Host "Domains      : $(if ($domainNames) { $domainNames } else { '(none)' })"
+$paramFile = New-TemporaryFile
+@{ '$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
+   contentVersion = '1.0.0.0'
+   parameters = @{ customDomains = @{ value = @($domains | ConvertFrom-Json) } } } |
+  ConvertTo-Json -Depth 6 | Set-Content -Path $paramFile -Encoding utf8
+
+$params = @("image=$Image", "minReplicas=$MinReplicas", "speechResourceId=$speechId", "@$paramFile")
 
 Write-Host '--- What-if preview ---'
 Invoke-Az deployment group what-if --resource-group $ResourceGroup --subscription $SubscriptionId `

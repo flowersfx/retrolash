@@ -62,7 +62,22 @@ The big screen can read round titles and prompts aloud with Azure AI Speech neur
 - **Data:** the text of custom prompts is sent to Azure Speech in this subscription.
 - **Without it:** `./infra/deploy.ps1 -NoSpeech`, or simply don't create the shared resource. The game runs silent and the lobby hides the toggle.
 
-### 5. Optional: automatic rollouts from GitHub
+### 5. Optional: a custom domain
+
+Retrolash runs at **https://retrolash.flowersfx.com**, with a free managed certificate that Azure issues and renews. The default `…azurecontainerapps.io` address keeps working too. To add a domain:
+
+1. Read the app's verification id: `az containerapp show -n retrolash -g rg-retrolash --subscription <id> --query properties.customDomainVerificationId -o tsv`
+2. In the domain's DNS zone, add a CNAME `<name>` → the app's `…azurecontainerapps.io` host, and a TXT `asuid.<name>` with the verification id. Nothing may proxy the name: the certificate is validated through the CNAME. On Dyn, check the zone was actually published: Dyn's own nameserver must answer for the TXT (`nslookup -type=TXT asuid.<name> ns1166.dns.dyn.com`).
+3. Bind it (the certificate takes up to ~20 minutes):
+
+   ```powershell
+   az containerapp hostname add  --hostname <fqdn> -n retrolash -g rg-retrolash --subscription <id>
+   az containerapp hostname bind --hostname <fqdn> -n retrolash -g rg-retrolash --subscription <id> --environment retrolash-env --validation-method CNAME
+   ```
+
+Domains are bound outside the template, so `deploy.ps1` reads the live bindings and passes them back in (`customDomains` parameter). Without that, a redeploy would remove them. The what-if shows the domain under "no change" when this works.
+
+### 6. Optional: automatic rollouts from GitHub
 
 ```powershell
 ./infra/setup-github-oidc.ps1 -SubscriptionId <id>
