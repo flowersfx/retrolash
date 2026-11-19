@@ -2,6 +2,8 @@
 // (no audio files). Browsers only allow audio after a user gesture, so the
 // context is created lazily and resumed on the first click or key press.
 
+import type { VoiceFxId } from "../shared/types";
+
 const KEY = "retrolash:sound";
 const MUSIC_KEY = "retrolash:music";
 
@@ -11,6 +13,8 @@ let sfxBus: GainNode | null = null;
 let musicBus: GainNode | null = null;
 let voiceBus: GainNode | null = null;
 let noiseBuf: AudioBuffer | null = null;
+/** Where speech clips go in: the voice effect chain, which ends in voiceBus. */
+let voiceIn: AudioNode | null = null;
 
 function readFlag(key: string, fallback: boolean) {
   try {
@@ -63,6 +67,7 @@ function audio(): AudioContext | null {
     voiceBus = ctx.createGain();
     voiceBus.gain.value = volume.voice;
     voiceBus.connect(master);
+    voiceIn = buildVoiceFx(ctx, voiceBus);
     musicBus = ctx.createGain();
     musicBus.gain.value = 0;
     musicBus.connect(master);
@@ -533,7 +538,7 @@ export async function sayClips(clips: { url: string; at?: number }[]) {
     await new Promise<void>((resolve) => {
       const src = c.createBufferSource();
       src.buffer = buf;
-      src.connect(voiceBus!);
+      src.connect(voiceIn ?? voiceBus!);
       src.onended = () => resolve();
       voiceSource = src;
       src.start();
@@ -541,6 +546,115 @@ export async function sayClips(clips: { url: string; at?: number }[]) {
     if (token !== voiceToken) return;
   }
   voiceSource = null;
+}
+
+// ---------- voice effect ----------
+// The same chain and numbers as the voice FX bench (tools/voice-fx/build.mjs), so
+// the game sounds like what was picked there:
+// in → low cut → soft saturation → high cut → (dry + pre-delay → reverb) → compressor → voiceBus
+
+type VoiceFx = { mix: number; decay: number; predelay: number; damp: number; drive: number; lowcut: number; highcut: number; comp: boolean; level: number };
+const VOICE_FX_PRESETS: Record<VoiceFxId, VoiceFx> = {
+  studio: { mix: 0.2, decay: 1.4, predelay: 20, damp: 7000, drive: 0.05, lowcut: 80, highcut: 14000, comp: true, level: 1 },
+  radio: { mix: 0.05, decay: 0.5, predelay: 0, damp: 4000, drive: 0.55, lowcut: 350, highcut: 3400, comp: true, level: 1 },
+  off: { mix: 0, decay: 0.2, predelay: 0, damp: 8000, drive: 0, lowcut: 10, highcut: 20000, comp: false, level: 1 },
+};
+let voiceFxId: VoiceFxId = "studio";
+let fx: {
+  hp: BiquadFilterNode; shaper: WaveShaperNode; post: GainNode; lp: BiquadFilterNode; dry: GainNode;
+  delay: DelayNode; conv: ConvolverNode; wet: GainNode; comp: DynamicsCompressorNode; out: GainNode; ir: string;
+} | null = null;
+
+function buildVoiceFx(c: AudioContext, dest: AudioNode): AudioNode {
+  const f = {
+    hp: c.createBiquadFilter(),
+    shaper: c.createWaveShaper(),
+    post: c.createGain(),
+    lp: c.createBiquadFilter(),
+    dry: c.createGain(),
+    delay: c.createDelay(0.5),
+    conv: c.createConvolver(),
+    wet: c.createGain(),
+    comp: c.createDynamicsCompressor(),
+    out: c.createGain(),
+    ir: "",
+  };
+  const mix = c.createGain();
+  f.hp.type = "highpass";
+  f.hp.Q.value = 0.7;
+  f.lp.type = "lowpass";
+  f.lp.Q.value = 0.7;
+  f.shaper.oversample = "4x";
+  f.comp.attack.value = 0.005;
+  f.comp.release.value = 0.2;
+  f.comp.knee.value = 8;
+  f.hp.connect(f.shaper).connect(f.post).connect(f.lp);
+  f.lp.connect(f.dry).connect(mix);
+  f.lp.connect(f.delay).connect(f.conv).connect(f.wet).connect(mix);
+  mix.connect(f.comp).connect(f.out).connect(dest);
+  fx = f;
+  applyVoiceFx();
+  return f.hp;
+}
+
+/** Stereo noise with a darkening exponential tail: a simple plate/room impulse. */
+function impulse(c: AudioContext, decay: number, damp: number) {
+  const rate = c.sampleRate;
+  const len = Math.max(1, Math.floor(rate * decay));
+  const ir = c.createBuffer(2, len, rate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = ir.getChannelData(ch);
+    let lp = 0;
+    for (let i = 0; i < len; i++) {
+      const t = i / len;
+      const a = Math.exp((-2 * Math.PI * damp * (1 - 0.7 * t)) / rate);
+      lp = (1 - a) * (Math.random() * 2 - 1) + a * lp;
+      d[i] = lp * Math.pow(1 - t, 2) * Math.exp(-3 * t);
+    }
+  }
+  return ir;
+}
+
+/** Soft clipping (tanh); more drive pushes harder into it. */
+function driveCurve(drive: number) {
+  const k = 1 + drive * 24;
+  const size = 2048;
+  const curve = new Float32Array(size);
+  for (let i = 0; i < size; i++) {
+    const x = (i / (size - 1)) * 2 - 1;
+    curve[i] = Math.tanh(k * x) / Math.tanh(k);
+  }
+  return curve;
+}
+
+function applyVoiceFx() {
+  if (!ctx || !fx) return;
+  const p = VOICE_FX_PRESETS[voiceFxId] ?? VOICE_FX_PRESETS.studio;
+  const t = ctx.currentTime;
+  const to = (param: AudioParam, v: number) => param.setTargetAtTime(v, t, 0.03);
+  to(fx.hp.frequency, p.lowcut);
+  to(fx.lp.frequency, p.highcut);
+  fx.shaper.curve = p.drive > 0 ? driveCurve(p.drive) : null;
+  to(fx.post.gain, 1 - p.drive * 0.35);
+  to(fx.dry.gain, 1 - p.mix * 0.5);
+  to(fx.wet.gain, p.mix * 2.2);
+  to(fx.delay.delayTime, p.predelay / 1000);
+  const ir = `${p.decay}:${p.damp}`;
+  if (ir !== fx.ir) {
+    fx.ir = ir;
+    fx.conv.buffer = impulse(ctx, p.decay, p.damp);
+  }
+  fx.comp.threshold.value = p.comp ? -18 : 0;
+  fx.comp.ratio.value = p.comp ? 3 : 1;
+  to(fx.out.gain, p.level);
+}
+
+/** The room's voice effect (settings.voiceFx). */
+export function setVoiceFx(id: VoiceFxId | undefined) {
+  const next = id && id in VOICE_FX_PRESETS ? id : "studio";
+  if (next === voiceFxId) return;
+  voiceFxId = next;
+  applyVoiceFx();
 }
 
 export function stopVoice() {

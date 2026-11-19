@@ -315,6 +315,65 @@ for (const n of [3, 4, 7, 8, 9, 10, 11, 16]) {
   g.dispose();
 }
 
+// Answers read aloud: quick voters don't cut the reading short. Every clip is 2 s here.
+{
+  const stub = {
+    enabled: true,
+    prefetch() {},
+    get: (l: { text: string }) => ({ id: "room/x", url: "/tts/room/x.mp3", ms: 2000, text: l.text }),
+  };
+  const cs: FakeConn[] = [];
+  const g = new GameRoom({ id: "rd", storage: { get: async () => undefined, put: async () => {} }, getConnections: () => cs }, 0.01, stub);
+  await g.onStart();
+  const join = (id: string, hello: object) => {
+    const c = new FakeConn(id);
+    cs.push(c);
+    g.onMessage(JSON.stringify(hello), c);
+    return c;
+  };
+  const h = join("h", { t: "helloHost" });
+  const ps = ["Ann", "Bo", "Cy"].map((n) => join(n, { t: "helloPlayer", name: n }));
+  g.onMessage(JSON.stringify({ t: "settings", settings: { rounds: ["warmup"] } }), h);
+  g.onMessage(JSON.stringify({ t: "start" }), h);
+  g.advance(); // answering
+  const round = g.state.rounds[g.state.roundIndex];
+  for (const c of ps)
+    for (const m of round.matchups.filter((x) => x.playerIds.includes(g.pidOf(c)!)))
+      g.onMessage(JSON.stringify({ t: "answer", matchupId: m.id, text: `from ${c.id}` }), c);
+  assert.equal(g.state.phase, "matchupIntro");
+  g.advance(); // voting
+  const m = round.matchups[g.state.matchupIndex];
+  const at = g.hostView().matchup?.answerAt ?? [];
+  assert.equal(at.length, 2, "card times while answers are read");
+  assert.ok(at[1] >= at[0] + 2000 + 250 + 2000, "second card after the first answer and the versus line");
+  const say = g.state.say ?? [];
+  assert.ok(say.some((c) => (c as { text?: string }).text?.match(/^(Versus|Or|Up against)…$/)), "versus between the answers");
+  for (const c of ps) if (!m.playerIds.includes(g.pidOf(c)!)) g.onMessage(JSON.stringify({ t: "vote", matchupId: m.id, choice: 0 }), c);
+  assert.equal(g.state.phase, "voting", "everyone voted, but the answers are still being read");
+  await new Promise((r) => setTimeout(r, 200)); // reading ends at about 7.3 s × 0.01
+  assert.notEqual(g.state.phase, "voting", "then the tally");
+  const author = ps.find((c) => m.playerIds.includes(g.pidOf(c)!))!;
+  const pv = (author.sent.find((x) => x.t === "view" && (x.view as { phase: string }).phase === "matchupResult")?.view ?? {}) as { resultInMs?: number; myResult?: unknown };
+  assert.ok(pv.myResult && (pv.resultInMs ?? 0) > 0, "phones hold their result until the big screen's tally");
+  g.dispose();
+}
+
+// Voice effect: studio by default, radio or off on request, anything else falls back.
+{
+  const cs: FakeConn[] = [];
+  const g = new GameRoom({ id: "fx", storage: { get: async () => undefined, put: async () => {} }, getConnections: () => cs });
+  await g.onStart();
+  const h = new FakeConn("h");
+  cs.push(h);
+  g.onMessage(JSON.stringify({ t: "helloHost" }), h);
+  assert.equal(g.state.settings.voiceFx, "studio", "studio plate by default");
+  g.onMessage(JSON.stringify({ t: "settings", settings: { voiceFx: "radio" } }), h);
+  assert.equal(g.state.settings.voiceFx, "radio");
+  g.onMessage(JSON.stringify({ t: "settings", settings: { voiceFx: "chipmunk" } }), h);
+  assert.equal(g.state.settings.voiceFx, "studio", "unknown effects fall back to studio");
+  g.dispose();
+}
+
 // Games saved before v0.8.2 used device ids as player ids: those phones still get back in.
 {
   const cs: FakeConn[] = [];

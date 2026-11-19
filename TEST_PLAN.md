@@ -222,6 +222,15 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 15.5 | With speech off (or the emoji round) | Cards fly in on the usual quick beat |
 | 15.6 | When a vote closes, watch a phone and the big screen together | Phones say "Eyes on the big screen" until the big screen has counted the votes in, then show won / lost / picked the winner (and buzz on a win) |
 
+## 16. Voice effect and full readings (v0.8.6)
+
+| # | Step | Expected |
+|---|------|----------|
+| 16.1 | Lobby, advanced settings, with speech on | "Voice effect" offers Studio plate (default), Old radio and None. Hidden when the server has no speech |
+| 16.2 | Play a round with each effect in the actual meeting room | Studio: a light plate reverb that carries in a big room. Radio: narrow, warm, slightly crunchy. None: the clip as is. No clipping or pumping at the usual volume |
+| 16.3 | With answers read aloud, have everyone vote straight away | The reading still finishes (all 2 or 3 answers and the "versus" lines) before the vote animation starts |
+| 16.4 | Same, but the facilitator presses Next during the reading | Voting ends at once (the facilitator can always skip) |
+
 ## Known gaps to check while testing
 
 - A phone that rejoins from a *different browser* with the same name can only take over once the old connection is gone (up to ~20 s after the phone slept). Until then it gets "Name 2"; remove the stale one in the lobby.

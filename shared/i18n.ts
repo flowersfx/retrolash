@@ -1,5 +1,5 @@
 // Screen texts in English and Swedish. Prompts live in prompts.ts / prompts-sv.ts.
-import type { Lang, PackId, RoundKind, ThemeId } from "./types";
+import type { Lang, PackId, RoundKind, ThemeId, VoiceFxId } from "./types";
 
 const en = {
   rounds: {
@@ -126,6 +126,8 @@ const en = {
     promptsAuto: (n: number) => `Auto (2, or 1 with ${n}+ players)`,
     theme: "Look",
     themes: { studio: "Studio", party: "Party" } as Record<ThemeId, string>,
+    voiceFx: "Voice effect",
+    voiceFxs: { studio: "Studio plate (bigger rooms)", radio: "Old radio (cosy, retro)", off: "None" } as Record<VoiceFxId, string>,
   },
   stage: {
     round: (n: number) => `Round ${n}`,
@@ -442,6 +444,8 @@ const sv: Strings = {
     promptsAuto: (n) => `Auto (2, eller 1 med ${n}+ spelare)`,
     theme: "Stil",
     themes: { studio: "Studio", party: "Fest" },
+    voiceFx: "Rösteffekt",
+    voiceFxs: { studio: "Studioplatta (större rum)", radio: "Gammal radio (mysig, retro)", off: "Ingen" },
   },
   stage: {
     round: (n) => `Runda ${n}`,

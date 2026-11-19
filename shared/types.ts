@@ -55,7 +55,13 @@ export interface Settings {
   promptsEach: number;
   /** Look of the big screen and phones. */
   theme: ThemeId;
+  /** Effect on the big screen's voice (src/sound.ts). */
+  voiceFx: VoiceFxId;
 }
+
+/** "studio": a plate reverb for bigger meeting rooms. "radio": a warm, narrow old-radio sound. "off": the clip as is. */
+export type VoiceFxId = "studio" | "radio" | "off";
+export const VOICE_FX: VoiceFxId[] = ["studio", "radio", "off"];
 
 /** "studio": calmer colours for meeting rooms. "party": the original neon look. */
 export type ThemeId = "studio" | "party";
@@ -89,6 +95,7 @@ export const DEFAULT_SETTINGS: Settings = {
   trios: true,
   promptsEach: 0,
   theme: "studio",
+  voiceFx: "studio",
 };
 
 /** From this many players, everyone gets one prompt per round instead of two (when promptsEach is auto). */

@@ -30,6 +30,7 @@ import {
   TRIO_MIN_PLAYERS,
   emojiOnly,
   revealTiming,
+  VOICE_FX,
   tally,
   winnerOf,
   isHeadToHead,
@@ -229,6 +230,8 @@ const KUDOS_FIRST_SPOKEN_MS = 2400;
 const ANSWER_FIRST_MS = 1300;
 /** How long an answer card takes to fly in (src/game.css). */
 const CARD_FLY_MS = 700;
+/** After the last answer is read: a beat (and room for clip loading on the big screen) before the tally. */
+const READ_MARGIN_MS = 600;
 const KUDOS_STEP_MS = 1800;
 /** How long the end of the kudos round waits for the last notes' clips. */
 const KUDOS_WAIT_MS = 3000;
@@ -288,6 +291,8 @@ export class GameRoom {
   private droppedAt = new Map<string, number>();
   /** When the current phase began (in memory: after a restart phones just show their result at once). */
   private phaseAt = 0;
+  /** While answers are read aloud: voting doesn't close before this, even if everyone has voted. */
+  private readUntil = 0;
   private graceTimers = new Set<ReturnType<typeof setTimeout>>();
 
   /** timeScale < 1 speeds every timer up (used by the end-to-end test). */
@@ -954,6 +959,8 @@ export class GameRoom {
     if (read) m.answerAt = read.at;
     else delete m.answerAt;
     this.spokenPhase("voting", s.settings.voteSeconds * 1000, [...lead, ...(read?.lines ?? [])], 0);
+    // Quick voters don't cut the reading short: the tally waits for the last answer.
+    this.readUntil = read ? Date.now() + (read.end + READ_MARGIN_MS) * this.timeScale : 0;
     if (this.expectedIds().length === 0 && this.connectedAudience().length === 0) this.endVoting();
   }
 
@@ -1002,7 +1009,7 @@ export class GameRoom {
    * on the usual beat, so no answer gets an unfair advantage. Emoji answers
    * aren't read (the voice would spell out emoji names).
    */
-  answerLines(round: Round, lead: TimedLine[] = []): { lines: TimedLine[]; at: number[] } | null {
+  answerLines(round: Round, lead: TimedLine[] = []): { lines: TimedLine[]; at: number[]; end: number } | null {
     const m = round.matchups[this.state.matchupIndex];
     const speech = this.speech;
     if (!m || round.kind === "emoji" || !speech?.enabled || !this.state.settings.speech) return null;
@@ -1032,7 +1039,7 @@ export class GameRoom {
       lines.push({ ...l, at: cursor });
       cursor += clips[i]!.ms;
     });
-    return { lines, at };
+    return { lines, at, end: cursor };
   }
 
   /** A kudos note as the voice says it: "For Ada: thanks for the reviews". */
@@ -1320,12 +1327,21 @@ export class GameRoom {
     if (s.phase !== "answering") {
       const waiting = this.connectedAudience().some((p) => !done.has(p.id));
       const left = s.deadline === null ? Infinity : s.deadline - Date.now();
+      // Answers still being read aloud: let the voice finish before the tally.
+      const reading = s.phase === "voting" ? this.readUntil : 0;
       if (waiting && left > AUDIENCE_GRACE_MS * this.timeScale && s.pausedMs === null) {
-        s.deadline = Date.now() + AUDIENCE_GRACE_MS * this.timeScale;
+        s.deadline = Math.max(Date.now() + AUDIENCE_GRACE_MS * this.timeScale, reading);
         this.armTimer();
         return;
       }
       if (waiting && left <= AUDIENCE_GRACE_MS * this.timeScale) return;
+      if (reading > Date.now()) {
+        if (s.pausedMs === null && (s.deadline === null || s.deadline > reading)) {
+          s.deadline = reading;
+          this.armTimer();
+        }
+        return;
+      }
     }
     this.advance();
   }
@@ -1901,6 +1917,7 @@ function sanitizeSettings(s: Settings): Settings {
     trios: s.trios !== false,
     promptsEach: clamp(s.promptsEach, 0, 2, DEFAULT_SETTINGS.promptsEach),
     theme: THEMES.includes(s.theme) ? s.theme : DEFAULT_SETTINGS.theme,
+    voiceFx: VOICE_FX.includes(s.voiceFx) ? s.voiceFx : DEFAULT_SETTINGS.voiceFx,
   };
 }
 

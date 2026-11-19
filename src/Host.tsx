@@ -23,6 +23,7 @@ import {
   musicTrackName,
   type MusicScene,
   setSoundEnabled,
+  setVoiceFx,
   sfx,
   soundEnabled,
   soundReady,
@@ -42,6 +43,7 @@ import {
   PLATE_COLORS,
   PODIUM_REVEAL,
   THEMES,
+  VOICE_FX,
   TRIO_MIN_PLAYERS,
   places,
   revealTiming,
@@ -191,6 +193,7 @@ export default function Host({ code, screen = false }: { code: string; screen?: 
   const seconds = useCountdown(view?.remainingMs, receivedAt);
   const { shown, exiting } = useStaged(view);
   useTheme(view?.settings.theme);
+  useEffect(() => setVoiceFx(view?.settings.voiceFx), [view?.settings.voiceFx]);
 
   // Browsers only allow sound after a gesture: unlock on the first click/key.
   useEffect(() => {
@@ -892,6 +895,18 @@ function SettingsPanel({
               <option value={2}>2</option>
             </select>
           </label>
+          {speechAvailable && (
+            <label>
+              {t.settings.voiceFx}
+              <select value={settings.voiceFx} onChange={(e) => update({ voiceFx: e.target.value as Settings["voiceFx"] })}>
+                {VOICE_FX.map((id) => (
+                  <option key={id} value={id}>
+                    {t.settings.voiceFxs[id]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="toggle wide">
             <input type="checkbox" checked={settings.trios} onChange={(e) => update({ trios: e.target.checked })} />
             <span>{t.settings.trios(TRIO_MIN_PLAYERS)}</span>

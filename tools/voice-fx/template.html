@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice FX bench</title>
+<style>
+  :root { --bg: #f6f5f2; --panel: #fff; --text: #1d1d1f; --muted: #6b6b70; --line: #e3e1dc; --accent: #5b4bdb; --accent-2: #ece9ff; --hot: #d9433f; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #16161a; --panel: #202026; --text: #ececf0; --muted: #9a9aa3; --line: #33333b; --accent: #9d92ff; --accent-2: #2c2950; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 28px 16px 60px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  p.lead { color: var(--muted); margin: 0 0 22px; max-width: 46em; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 12px; }
+  .list button { display: block; width: 100%; text-align: left; margin: 0 0 6px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.on { background: var(--accent-2); border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .row { display: grid; grid-template-columns: 8em 1fr 4.5em; align-items: center; gap: 10px; margin: 0 0 8px; }
+  .row label { color: var(--muted); }
+  .row output { text-align: right; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .tag { font-size: 0.75rem; color: var(--muted); margin-left: 6px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow-x: auto; font-size: 0.85rem; margin: 0; }
+  .meter { height: 8px; border-radius: 4px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; margin-top: 12px; }
+  .meter div { height: 100%; width: 0; background: var(--accent); }
+  .meter.hot div { background: var(--hot); }
+  .small { font-size: 0.85rem; color: var(--muted); }
+  .check { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Voice FX bench</h1>
+  <p class="lead">Real Retrolash clips (Azure Jenny in the cheerful style, and Sofie) through a reverb and saturation chain. The game offers Studio plate (default), Old radio and None (Voice effect in the lobby's advanced settings). Pick a preset, tweak the sliders, and copy the settings into VOICE_FX_PRESETS in src/sound.ts.</p>
+  <div class="grid">
+    <section>
+      <h2>Clips</h2>
+      <div class="list" id="clips"></div>
+      <div class="bar">
+        <button class="primary" id="seq">▶ Vote sequence</button>
+        <button id="ab">A/B: dry, then with FX</button>
+        <button id="stop">■ Stop</button>
+      </div>
+      <label class="small check"><input type="checkbox" id="loop"> Loop the selected clip</label>
+      <div class="meter" id="meter"><div></div></div>
+      <p class="small">Output level. It turns red near clipping.</p>
+    </section>
+    <section>
+      <h2>Presets</h2>
+      <div class="list" id="presets"></div>
+    </section>
+    <section>
+      <h2>Reverb</h2>
+      <div id="rev"></div>
+    </section>
+    <section>
+      <h2>Saturation and tone</h2>
+      <div id="tone"></div>
+      <label class="small check"><input type="checkbox" id="comp"> Gentle compressor (evens out the level)</label>
+    </section>
+  </div>
+  <section style="margin-top:16px">
+    <h2>Settings to send back</h2>
+    <pre id="out"></pre>
+    <div class="bar"><button id="copy">Copy settings</button></div>
+  </section>
+</main>
+<script>
+const CLIPS = /*CLIPS*/[];
+const PRESETS = {
+  "None (dry)": { mix: 0, decay: 1, predelay: 0, damp: 8000, drive: 0, lowcut: 20, highcut: 16000, comp: false, level: 1 },
+  "Subtle room": { mix: 0.12, decay: 0.6, predelay: 10, damp: 6000, drive: 0, lowcut: 60, highcut: 14000, comp: false, level: 1 },
+  "Studio plate": { mix: 0.2, decay: 1.4, predelay: 20, damp: 7000, drive: 0.05, lowcut: 80, highcut: 14000, comp: true, level: 1 },
+  "Game-show announcer": { mix: 0.26, decay: 2.2, predelay: 35, damp: 5000, drive: 0.18, lowcut: 90, highcut: 12000, comp: true, level: 1 },
+  "Warm tape": { mix: 0.08, decay: 0.8, predelay: 8, damp: 5000, drive: 0.35, lowcut: 70, highcut: 9000, comp: true, level: 0.95 },
+  "Old radio": { mix: 0.05, decay: 0.5, predelay: 0, damp: 4000, drive: 0.55, lowcut: 350, highcut: 3400, comp: true, level: 1 },
+};
+const PARAMS = [
+  ["rev", "mix", "Mix", 0, 0.6, 0.01, (v) => Math.round(v * 100) + "%"],
+  ["rev", "decay", "Decay", 0.2, 4, 0.05, (v) => v.toFixed(2) + " s"],
+  ["rev", "predelay", "Pre-delay", 0, 120, 1, (v) => v + " ms"],
+  ["rev", "damp", "Damping", 1500, 12000, 100, (v) => (v / 1000).toFixed(1) + " kHz"],
+  ["tone", "drive", "Drive", 0, 1, 0.01, (v) => Math.round(v * 100) + "%"],
+  ["tone", "lowcut", "Low cut", 20, 600, 5, (v) => v + " Hz"],
+  ["tone", "highcut", "High cut", 2000, 16000, 100, (v) => (v / 1000).toFixed(1) + " kHz"],
+  ["tone", "level", "Output", 0.3, 1.5, 0.01, (v) => Math.round(v * 100) + "%"],
+];
+const FMT = Object.fromEntries(PARAMS.map((p) => [p[1], p[6]]));
+let preset = "Game-show announcer";
+let s = { ...PRESETS[preset] };
+let current = 0;
+
+let ctx = null, n = null, irKey = "";
+const buffers = [];
+let playing = [];
+
+function setup() {
+  if (ctx) return;
+  ctx = new AudioContext();
+  n = {
+    in: ctx.createGain(),
+    hp: ctx.createBiquadFilter(),
+    shaper: ctx.createWaveShaper(),
+    post: ctx.createGain(),
+    lp: ctx.createBiquadFilter(),
+    dry: ctx.createGain(),
+    delay: ctx.createDelay(0.5),
+    conv: ctx.createConvolver(),
+    wet: ctx.createGain(),
+    mix: ctx.createGain(),
+    comp: ctx.createDynamicsCompressor(),
+    out: ctx.createGain(),
+    an: ctx.createAnalyser(),
+  };
+  n.hp.type = "highpass"; n.hp.Q.value = 0.7;
+  n.lp.type = "lowpass"; n.lp.Q.value = 0.7;
+  n.shaper.oversample = "4x";
+  n.comp.attack.value = 0.005; n.comp.release.value = 0.2; n.comp.knee.value = 8;
+  n.an.fftSize = 1024;
+  // in → low cut → saturation → high cut → (dry + pre-delay → reverb) → compressor → output
+  n.in.connect(n.hp); n.hp.connect(n.shaper); n.shaper.connect(n.post); n.post.connect(n.lp);
+  n.lp.connect(n.dry); n.lp.connect(n.delay); n.delay.connect(n.conv); n.conv.connect(n.wet);
+  n.dry.connect(n.mix); n.wet.connect(n.mix);
+  n.mix.connect(n.comp); n.comp.connect(n.out); n.out.connect(n.an); n.an.connect(ctx.destination);
+  meter();
+}
+
+/** Stereo noise with a darkening exponential tail: a simple plate/room impulse. */
+function impulse(decay, damp) {
+  const rate = ctx.sampleRate, len = Math.max(1, Math.floor(rate * decay));
+  const ir = ctx.createBuffer(2, len, rate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = ir.getChannelData(ch);
+    let lp = 0;
+    for (let i = 0; i < len; i++) {
+      const t = i / len;
+      const a = Math.exp((-2 * Math.PI * damp * (1 - 0.7 * t)) / rate);
+      lp = (1 - a) * (Math.random() * 2 - 1) + a * lp;
+      d[i] = lp * Math.pow(1 - t, 2) * Math.exp(-3 * t);
+    }
+  }
+  return ir;
+}
+
+/** Soft clipping (tanh); more drive pushes harder into it. */
+function curve(drive) {
+  const k = 1 + drive * 24, size = 2048, c = new Float32Array(size);
+  for (let i = 0; i < size; i++) { const x = (i / (size - 1)) * 2 - 1; c[i] = Math.tanh(k * x) / Math.tanh(k); }
+  return c;
+}
+
+function apply() {
+  if (!ctx) return;
+  const t = ctx.currentTime, to = (p, v) => p.setTargetAtTime(v, t, 0.03);
+  to(n.hp.frequency, s.lowcut);
+  to(n.lp.frequency, s.highcut);
+  n.shaper.curve = s.drive > 0 ? curve(s.drive) : null;
+  to(n.post.gain, 1 - s.drive * 0.35);
+  to(n.dry.gain, 1 - s.mix * 0.5);
+  to(n.wet.gain, s.mix * 2.2);
+  to(n.delay.delayTime, s.predelay / 1000);
+  const key = s.decay.toFixed(2) + ":" + s.damp;
+  if (key !== irKey) { irKey = key; n.conv.buffer = impulse(s.decay, s.damp); }
+  n.comp.threshold.value = s.comp ? -18 : 0;
+  n.comp.ratio.value = s.comp ? 3 : 1;
+  to(n.out.gain, s.level);
+}
+
+async function buffer(i) {
+  if (!buffers[i]) buffers[i] = await ctx.decodeAudioData(await (await fetch(CLIPS[i].src)).arrayBuffer());
+  return buffers[i];
+}
+function stop() { for (const p of playing) { try { p.stop(); } catch {} } playing = []; }
+/** Play clip i `when` seconds from now; returns when it ends (seconds from now). */
+async function play(i, when = 0, dry = false) {
+  setup(); apply();
+  if (ctx.state === "suspended") await ctx.resume();
+  const b = await buffer(i);
+  const src = ctx.createBufferSource();
+  src.buffer = b;
+  src.loop = !dry && when === 0 && document.getElementById("loop").checked;
+  src.connect(dry ? n.an : n.in);
+  src.start(ctx.currentTime + 0.05 + when);
+  playing.push(src);
+  return when + 0.05 + b.duration;
+}
+function meter() {
+  const d = new Float32Array(n.an.fftSize), el = document.getElementById("meter");
+  const tick = () => {
+    n.an.getFloatTimeDomainData(d);
+    let peak = 0; for (const x of d) peak = Math.max(peak, Math.abs(x));
+    el.firstElementChild.style.width = Math.min(100, peak * 100) + "%";
+    el.classList.toggle("hot", peak > 0.95);
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+// ---- UI
+const clipsEl = document.getElementById("clips");
+CLIPS.forEach((c, i) => {
+  const b = document.createElement("button");
+  b.innerHTML = `▶ ${c.text}<span class="tag">${c.lang}</span>`;
+  b.onclick = () => { current = i; stop(); play(i); render(); };
+  clipsEl.append(b);
+});
+const presetsEl = document.getElementById("presets");
+for (const name of Object.keys(PRESETS)) {
+  const b = document.createElement("button");
+  b.textContent = name;
+  b.onclick = () => { preset = name; s = { ...PRESETS[name] }; render(); stop(); play(current); };
+  presetsEl.append(b);
+}
+for (const [box, key, label, min, max, step] of PARAMS) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.innerHTML = `<label for="p-${key}">${label}</label><input type="range" id="p-${key}" min="${min}" max="${max}" step="${step}"><output id="o-${key}"></output>`;
+  row.querySelector("input").oninput = (e) => { s[key] = +e.target.value; preset = "custom"; render(); apply(); };
+  document.getElementById(box).append(row);
+}
+document.getElementById("comp").onchange = (e) => { s.comp = e.target.checked; preset = "custom"; render(); apply(); };
+document.getElementById("stop").onclick = stop;
+document.getElementById("seq").onclick = async () => {
+  // As in a vote: "time to vote", then "versus", then a clean-sweep reaction (Swedish if a Swedish clip is selected).
+  stop();
+  const ids = CLIPS[current].lang === "sv" ? [4, 5, 6] : [0, 1, 2];
+  let t = 0;
+  for (const i of ids) t = (await play(i, t)) + 0.35;
+};
+document.getElementById("ab").onclick = async () => { stop(); const end = await play(current, 0, true); await play(current, end + 0.6); };
+document.getElementById("copy").onclick = () => navigator.clipboard?.writeText(document.getElementById("out").textContent);
+function render() {
+  for (const [, key] of PARAMS) {
+    document.getElementById("p-" + key).value = s[key];
+    document.getElementById("o-" + key).textContent = FMT[key](s[key]);
+  }
+  document.getElementById("comp").checked = s.comp;
+  [...presetsEl.children].forEach((b) => b.classList.toggle("on", b.textContent === preset));
+  [...clipsEl.children].forEach((b, i) => b.classList.toggle("on", i === current));
+  document.getElementById("out").textContent = JSON.stringify({ preset, ...s }, null, 2);
+}
+render();
+</script>
+</body>
+</html>
