@@ -46,34 +46,52 @@ let started = false;
 let vipPresses = 0;
 const t0 = Date.now();
 
-// The VIP phone: joins as audience, gets VIP from the host, presses next at lashResult.
-const vip = new WebSocket(url("vip-phone"));
-const vipSend = (m) => vip.send(JSON.stringify(m));
-let vipView = null;
-vip.onopen = () => vipSend({ t: "helloPlayer", name: "VIP", audience: true });
-vip.onmessage = (e) => {
-  const msg = JSON.parse(e.data);
-  if (msg.t !== "view") return;
-  vipView = msg.view;
-  if (vipView.phase === "lashResult" && vipView.vipControls && vipPresses === 0) {
-    vipPresses++;
-    // Give the bots a moment to volunteer as owners.
-    setTimeout(() => vipSend({ t: "next" }), 2500);
-  }
-};
+// Before any big screen: a phone (or extra screen) can't conjure up a game for an unknown code.
+const refused = (code, hello) =>
+  new Promise((resolve) => {
+    const s = new WebSocket(`ws://localhost:${PORT}/parties/main/${code}?_pk=nobody`);
+    let reply = null;
+    s.onopen = () => s.send(JSON.stringify(hello));
+    s.onmessage = (ev) => (reply = JSON.parse(ev.data).t);
+    s.onclose = (ev) => resolve(`${reply}/${ev.code}`);
+  });
+for (const hello of [{ t: "helloPlayer", name: "Early" }, { t: "helloScreen" }]) {
+  const r = await refused(CODE.toLowerCase(), hello);
+  if (r !== "error/4404") fail(`${hello.t} to an unknown room should be refused, got ${r}`);
+}
 
-// An extra big screen in "another room": sees the show and the reactions, controls nothing.
+let vip, vipSend, screen;
 const tv = { views: 0, reactions: 0, phases: new Set() };
-const screen = new WebSocket(url("extra-screen"));
-screen.onopen = () => screen.send(JSON.stringify({ t: "helloScreen" }));
-screen.onmessage = (e) => {
-  const msg = JSON.parse(e.data);
-  if (msg.t === "reaction") tv.reactions++;
-  if (msg.t === "view") {
-    tv.views++;
-    tv.phases.add(msg.view.phase);
-  }
-};
+let vipView = null;
+/** Once the big screen has made the room: the VIP phone and the extra screen join. */
+function joinOthers() {
+  // The VIP phone: joins as audience, gets VIP from the host, presses next at lashResult.
+  vip = new WebSocket(url("vip-phone"));
+  vipSend = (m) => vip.send(JSON.stringify(m));
+  vip.onopen = () => vipSend({ t: "helloPlayer", name: "VIP", audience: true });
+  vip.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.t !== "view") return;
+    vipView = msg.view;
+    if (vipView.phase === "lashResult" && vipView.vipControls && vipPresses === 0) {
+      vipPresses++;
+      // Give the bots a moment to volunteer as owners.
+      setTimeout(() => vipSend({ t: "next" }), 2500);
+    }
+  };
+
+  // An extra big screen in "another room": sees the show and the reactions, controls nothing.
+  screen = new WebSocket(url("extra-screen"));
+  screen.onopen = () => screen.send(JSON.stringify({ t: "helloScreen" }));
+  screen.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.t === "reaction") tv.reactions++;
+    if (msg.t === "view") {
+      tv.views++;
+      tv.phases.add(msg.view.phase);
+    }
+  };
+}
 
 const ws = new WebSocket(url("host"));
 const send = (m) => ws.send(JSON.stringify(m));
@@ -90,7 +108,6 @@ ws.onopen = () => {
       previousItems: ["Fix the flaky tests", "Shorter standups"],
     },
   });
-  botProc = bots();
 };
 let last = "";
 let lashTitle = "";
@@ -101,7 +118,11 @@ let answersRead = 0;
 let kudosRead = 0;
 ws.onmessage = (e) => {
   const msg = JSON.parse(e.data);
-  if (msg.t === "hostToken") hostToken = msg.token;
+  if (msg.t === "hostToken") {
+    hostToken = msg.token;
+    joinOthers();
+    botProc = bots();
+  }
   if (msg.t !== "view") return;
   const v = msg.view;
   const key = `${v.phase}|${v.roundTitle ?? ""}|${v.matchupNumber ?? ""}`;
@@ -178,6 +199,19 @@ async function check(v) {
   console.log(`speech: clips on ${[...spokenPhases].join(", ")}; answers read aloud in ${answersRead} votes`);
   if (answersRead === 0) fail("answers were never read aloud");
   if (kudosRead !== PLAYERS) fail(`expected all ${PLAYERS} kudos read aloud, got ${kudosRead}`);
+
+  // Player ids are public (every view has them) and must not work as a login.
+  const victim = v.players.find((p) => !p.audience);
+  const impostor = await new Promise((resolve) => {
+    const s = new WebSocket(url(victim.id));
+    s.onopen = () => s.send(JSON.stringify({ t: "helloPlayer", name: "" }));
+    s.onmessage = (ev) => {
+      const m = JSON.parse(ev.data);
+      resolve(m.t === "view" ? `view as ${m.view.you?.name}` : m.t);
+      s.close();
+    };
+  });
+  if (impostor !== "error") fail(`connecting with ${victim.name}'s public id should not log in as them, got ${impostor}`);
 
   // Only the first big screen (or one with its token) may host.
   const hostHello = (token) =>

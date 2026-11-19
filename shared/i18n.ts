@@ -27,6 +27,8 @@ const en = {
     gameFull: "This game is full. You can still join as audience.",
     kicked: "You were removed from the room.",
     hostTaken: "This room already has a big screen. Open it from the browser that started it, add this one as an extra screen, or start a new room.",
+    noRoom: "There's no game with that code. Check the code on the big screen.",
+    busy: "Too many new games right now. Try again in a few minutes.",
   },
   next: {
     skipTimer: "Skip timer",
@@ -338,6 +340,8 @@ const sv: Strings = {
     gameFull: "Spelet är fullt. Du kan fortfarande gå med som publik.",
     kicked: "Du togs bort från rummet.",
     hostTaken: "Det här rummet har redan en storskärm. Öppna det från webbläsaren som startade det, lägg till den här som extra skärm, eller starta ett nytt rum.",
+    noRoom: "Det finns inget spel med den koden. Kolla koden på storskärmen.",
+    busy: "För många nya spel just nu. Försök igen om några minuter.",
   },
   next: {
     skipTimer: "Hoppa över timern",

@@ -122,12 +122,19 @@ const players = ["a", "b", "c"].map((id) => {
   say(c, { t: "helloPlayer", name: id.toUpperCase() });
   return c;
 });
+// Player ids are public and server-made; the device id is the phone's secret.
+const aId = game.pidOf(players[0])!;
+assert.ok(aId && aId !== "a", "player ids are not device ids");
+const impostor = connect(aId);
+say(impostor, { t: "helloPlayer", name: "" });
+assert.equal(impostor.sent.at(-1)?.t, "error", "a public player id is not a login");
+assert.equal(game.pidOf(impostor), null, "and gets no player");
 say(host, { t: "settings", settings: { rounds: ["warmup"] } });
 say(host, { t: "start" });
 assert.equal(game.state.phase, "roundIntro");
 game.advance(); // answering
 const round = game.state.rounds[0];
-for (const m of round.matchups.filter((x) => x.playerIds.includes("a")))
+for (const m of round.matchups.filter((x) => x.playerIds.includes(aId)))
   say(players[0], { t: "answer", matchupId: m.id, text: "A real answer" });
 game.advance(); // time's up: fill in, then the first playable matchup
 assert.equal(round.matchups.filter((m) => m.auto).length, 2, "both of a's opponents got an auto-answer");
@@ -137,7 +144,7 @@ const m = round.matchups[game.state.matchupIndex];
 assert.ok(m.auto && m.answers.every((x) => x !== null), "the played matchup has a real and an auto answer");
 game.advance(); // voting
 const autoSide = m.auto![0] ? 0 : 1;
-const voter = players.find((p) => !m.playerIds.includes(p.id))!;
+const voter = players.find((p) => !m.playerIds.includes(game.pidOf(p)!))!;
 say(voter, { t: "vote", matchupId: m.id, choice: autoSide });
 assert.equal(game.state.phase, "matchupResult", "the only voter closes the vote");
 assert.deepEqual(m.points, autoSide === 0 ? [50, 0] : [0, 50], "an auto-answer earns half its vote points and no win bonus");
@@ -185,20 +192,21 @@ for (const n of [3, 4, 7, 8, 9, 10, 11, 16]) {
   });
   // A phone sleeps, its tab is gone; the same name on a new device id picks the player up again.
   const gone = ps[8];
+  const p8 = g.pidOf(gone)!;
   conns2.splice(conns2.indexOf(gone), 1);
   g.onClose(gone);
-  assert.equal(g.player("d8")?.connected, false);
+  assert.equal(g.player(p8)?.connected, false);
   const back = join("d8-new-tab");
   tell(back, { t: "helloPlayer", name: "p8" });
   assert.equal(g.state.players.filter((p) => !p.audience).length, 9, "no duplicate player on rejoin");
-  assert.equal(g.player("d8")?.connected, true, "the old player is connected again");
-  assert.equal(g.state.aliases["d8-new-tab"], "d8");
+  assert.equal(g.player(p8)?.connected, true, "the old player is connected again");
+  assert.equal(g.state.aliases["d8-new-tab"], p8);
   ps[8] = back;
   // A connected name is not taken over: that's a second person with the same name.
   const twin = join("twin");
   tell(twin, { t: "helloPlayer", name: "P1" });
   assert.ok(g.state.players.some((p) => p.name === "P1 2"), "a connected player keeps their name");
-  tell(host2, { t: "kick", playerId: "twin" });
+  tell(host2, { t: "kick", playerId: g.pidOf(twin)! });
 
   tell(screen, { t: "start" });
   assert.equal(g.state.phase, "lobby", "an extra screen cannot start the game");
@@ -258,13 +266,14 @@ for (const n of [3, 4, 7, 8, 9, 10, 11, 16]) {
   g.advance(); // answering
   const r = g.state.rounds[0];
   // c's phone drops (screen off) before answering; a and b answer everything.
+  const cId = g.pidOf(c)!;
   cs.splice(cs.indexOf(c), 1);
   g.onClose(c);
-  for (const [conn, id] of [[a, "a"], [b, "b"]] as const)
+  for (const [conn, id] of [[a, g.pidOf(a)!], [b, g.pidOf(b)!]] as const)
     for (const m of r.matchups.filter((x) => x.playerIds.includes(id)))
       g.onMessage(JSON.stringify({ t: "answer", matchupId: m.id, text: `from ${id}` }), conn);
   assert.equal(g.state.phase, "answering", "a player who just dropped is still waited for");
-  assert.ok(g.hostView().expectedIds.includes("c"));
+  assert.ok(g.hostView().expectedIds.includes(cId));
   await new Promise((res) => setTimeout(res, 150)); // grace is 45 s × 0.002 = 90 ms
   assert.notEqual(g.state.phase, "answering", "after the grace period the round goes on without them");
   g.dispose();
@@ -284,13 +293,28 @@ for (const n of [3, 4, 7, 8, 9, 10, 11, 16]) {
   const h = join("h", { t: "helloHost" });
   const tv = join("tv", { t: "helloScreen" });
   const ps = ["A", "B", "C", "D"].map((n) => join(n, { t: "helloPlayer", name: n }));
+  const [aId, dId] = [g.pidOf(ps[0])!, g.pidOf(ps[3])!];
   g.onMessage(JSON.stringify({ t: "leave" }), ps[3]);
-  assert.equal(g.player("D"), undefined, "D left");
+  assert.equal(g.player(dId), undefined, "D left");
   assert.ok(h.sent.some((m) => m.t === "left" && m.name === "D") && tv.sent.some((m) => m.t === "left"), "big screens are told");
   g.onMessage(JSON.stringify({ t: "settings", settings: { rounds: ["warmup"] } }), h);
   g.onMessage(JSON.stringify({ t: "start" }), h);
   g.onMessage(JSON.stringify({ t: "leave" }), ps[0]);
-  assert.ok(g.player("A"), "can't leave mid-game");
+  assert.ok(g.player(aId), "can't leave mid-game");
+  g.dispose();
+}
+
+// Games saved before v0.8.2 used device ids as player ids: those phones still get back in.
+{
+  const cs: FakeConn[] = [];
+  const old = { players: [{ id: "old-phone", name: "Old", avatar: "🦊", connected: true, score: 40 }], aliases: {} };
+  const g = new GameRoom({ id: "legc", storage: { get: async () => old as never, put: async () => {} }, getConnections: () => cs });
+  await g.onStart();
+  const c = new FakeConn("old-phone");
+  cs.push(c);
+  g.onMessage(JSON.stringify({ t: "helloPlayer", name: "" }), c);
+  assert.equal(g.pidOf(c), "old-phone", "an old saved player is picked up by its device");
+  assert.equal(g.player("old-phone")?.score, 40);
   g.dispose();
 }
 
@@ -348,10 +372,11 @@ assert.equal(groupPlayers(Array.from({ length: 12 }, (_, i) => `r${i}`), true, 1
   g.onMessage(JSON.stringify({ t: "settings", settings: { rounds: ["kudos"] } }), h);
   g.onMessage(JSON.stringify({ t: "start" }), h);
   g.advance(); // answering
-  g.onMessage(JSON.stringify({ t: "kudos", to: "Bo", text: "Thanks for the reviews" }), ps[0]);
+  const [annId, boId] = [g.pidOf(ps[0])!, g.pidOf(ps[1])!];
+  g.onMessage(JSON.stringify({ t: "kudos", to: boId, text: "Thanks for the reviews" }), ps[0]);
   g.onMessage(JSON.stringify({ t: "kudos", to: "team", text: "Great sprint everyone" }), ps[1]);
   await new Promise((r) => setTimeout(r, 300)); // fake speech makes those two clips
-  g.onMessage(JSON.stringify({ t: "kudos", to: "Ann", text: "Saved the demo" }), ps[2]);
+  g.onMessage(JSON.stringify({ t: "kudos", to: annId, text: "Saved the demo" }), ps[2]);
   assert.equal(g.state.phase, "answering", "the last note's clip gets a moment before the reveal");
   await new Promise((r) => setTimeout(r, 600)); // the wait is 3 s × 0.1
   assert.equal(g.state.phase, "pollResult");

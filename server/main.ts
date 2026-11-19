@@ -15,6 +15,7 @@ import { GameRoom, type Connection, type Room } from "./game";
 import { FileStorage } from "./storage";
 import { parseUsage, summarize, type UsageSummary } from "./usage";
 import { AzureSpeech } from "./tts";
+import { strings } from "../shared/i18n";
 
 const PORT = Number(process.env.PORT ?? 1999);
 const DATA_DIR = process.env.DATA_DIR ?? path.resolve("data");
@@ -23,6 +24,11 @@ const ROOM_TTL_HOURS = Number(process.env.ROOM_TTL_HOURS ?? 24);
 /** Drop a room from memory after this long with nobody connected. */
 const IDLE_EVICT_MS = 30 * 60_000;
 const MAX_ROOMS = 200;
+/** New games one address may start per window (an office NAT shares one, so not too low). */
+const ROOMS_PER_IP = 10;
+const ROOMS_PER_IP_WINDOW_MS = 10 * 60_000;
+/** A socket that says nothing this long is closed (every real client says hello at once). */
+const HELLO_TIMEOUT_MS = 10_000;
 /** Test hook: 0.1 makes every game timer 10x faster. */
 const TIME_SCALE = Number(process.env.TIME_SCALE ?? 1) || 1;
 const STATIC_DIR =
@@ -55,6 +61,12 @@ function recordUsage(e: Record<string, unknown>) {
 
 const ROOM_PATH = /^\/parties\/main\/([a-z]{4})\/?$/;
 const DEVICE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+/** Ids that would collide with Object.prototype keys in the alias table. */
+const RESERVED_IDS = new Set(["__proto__", "constructor", "prototype"]);
+/** Close codes for sockets we turn away (the error message goes first). */
+const CLOSE_NO_ROOM = 4404;
+const CLOSE_BUSY = 4429;
+const CLOSE_SILENT = 4408;
 
 const log = (...args: unknown[]) => console.log(new Date().toISOString(), ...args);
 
@@ -131,11 +143,14 @@ class RoomHost implements Room {
   /** Serialises hook calls so the game never sees interleaved events. */
   private queue: Promise<void>;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When the last connection left (0 while someone is connected). */
+  idleSince = Date.now();
 
   constructor(readonly id: string) {
     this.storage = new FileStorage(path.join(DATA_DIR, `${id}.json`), { persist: () => persist, log });
     this.game = new GameRoom(this, TIME_SCALE, speech, recordUsage);
-    this.ready = this.game.onStart();
+    // If this room was just evicted, let its last save land before loading it again.
+    this.ready = (closing.get(id) ?? Promise.resolve()).then(() => this.game.onStart());
     this.queue = this.ready.catch((err) => log(`room ${id} failed to start`, err));
   }
 
@@ -150,6 +165,7 @@ class RoomHost implements Room {
   add(conn: WsConnection) {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = null;
+    this.idleSince = 0;
     this.connections.add(conn);
     this.run(() => this.game.onConnect(conn));
   }
@@ -158,6 +174,7 @@ class RoomHost implements Room {
     this.connections.delete(conn);
     this.run(() => this.game.onClose(conn));
     if (this.connections.size === 0) {
+      this.idleSince = Date.now();
       this.idleTimer = setTimeout(() => void evict(this), IDLE_EVICT_MS);
     }
   }
@@ -171,22 +188,74 @@ class RoomHost implements Room {
 }
 
 const rooms = new Map<string, RoomHost>();
+/** Rooms being saved and dropped from memory, by id. */
+const closing = new Map<string, Promise<void>>();
+/** Recent room creations per client address. */
+const created = new Map<string, number[]>();
 
-function getRoom(id: string): RoomHost | null {
-  let room = rooms.get(id);
-  if (!room) {
-    if (rooms.size >= MAX_ROOMS) return null;
-    room = new RoomHost(id);
-    rooms.set(id, room);
+/** Is there a saved game for this code on disk (evicted from memory, or from before a restart)? */
+async function savedGame(id: string) {
+  if (!persist) return false;
+  for (const suffix of ["", ".bak", ".tmp"]) {
+    const info = await stat(path.join(DATA_DIR, `${id}.json${suffix}`)).catch(() => null);
+    if (info?.isFile()) return true;
   }
+  return false;
+}
+
+/** The room in memory, or loaded from its saved game. Never makes up a new game. */
+async function openRoom(id: string): Promise<RoomHost | null> {
+  const live = rooms.get(id);
+  if (live) return live;
+  if (!closing.has(id) && !(await savedGame(id))) return null;
+  return rooms.get(id) ?? makeRoom(id);
+}
+
+/** A brand new game, for a big screen. Null when this address starts too many, or the server is full. */
+function createRoom(id: string, ip: string): RoomHost | null {
+  const live = rooms.get(id);
+  if (live) return live;
+  const now = Date.now();
+  const recent = (created.get(ip) ?? []).filter((t) => now - t < ROOMS_PER_IP_WINDOW_MS);
+  if (recent.length >= ROOMS_PER_IP) {
+    log(`refused a new room for ${ip}: ${recent.length} in the last ${ROOMS_PER_IP_WINDOW_MS / 60_000} min`);
+    return null;
+  }
+  const room = makeRoom(id);
+  if (room) created.set(ip, [...recent, now]);
+  return room;
+}
+
+function makeRoom(id: string): RoomHost | null {
+  if (rooms.size >= MAX_ROOMS) {
+    // Full: make way by dropping the longest-idle room. It is saved, so it comes back on its next visit.
+    const idle = [...rooms.values()].filter((r) => r.connections.size === 0).sort((a, b) => a.idleSince - b.idleSince)[0];
+    if (!idle || !persist) {
+      log(`refused a room: ${rooms.size} rooms in memory, none idle`);
+      return null;
+    }
+    void evict(idle);
+  }
+  const room = new RoomHost(id);
+  rooms.set(id, room);
   return room;
 }
 
 async function evict(room: RoomHost) {
-  if (room.connections.size > 0) return;
+  if (room.connections.size > 0 || rooms.get(room.id) !== room) return;
   rooms.delete(room.id);
-  await room.close();
+  const done: Promise<void> = room.close().finally(() => {
+    if (closing.get(room.id) === done) closing.delete(room.id);
+  });
+  closing.set(room.id, done);
+  await done;
 }
+
+// Forget old creation counts now and then.
+const forgetCreated = setInterval(() => {
+  const now = Date.now();
+  for (const [ip, times] of created) if (times.every((t) => now - t >= ROOMS_PER_IP_WINDOW_MS)) created.delete(ip);
+}, ROOMS_PER_IP_WINDOW_MS);
 
 // ---------- static files ----------
 
@@ -290,26 +359,76 @@ const http = createServer((req, res) => {
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
 
+/** The client's address. Behind the Container Apps ingress the real one is the last X-Forwarded-For entry. */
+function clientIp(req: IncomingMessage) {
+  const fwd = req.headers["x-forwarded-for"];
+  const last = (Array.isArray(fwd) ? fwd.join(",") : (fwd ?? "")).split(",").pop()?.trim();
+  return last || req.socket.remoteAddress || "?";
+}
+
 http.on("upgrade", (req, socket, head) => {
   const url = new URL(req.url ?? "/", "http://x");
   const match = ROOM_PATH.exec(url.pathname);
   const deviceId = url.searchParams.get("_pk") ?? "";
-  const room = match && DEVICE_ID.test(deviceId) ? getRoom(match[1]) : null;
-  if (!room) {
+  if (!match || !DEVICE_ID.test(deviceId) || RESERVED_IDS.has(deviceId)) {
     socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
     socket.destroy();
     return;
   }
+  const id = match[1];
+  const ip = clientIp(req);
+  // Refusals come before there is a room (and its language), so they follow the browser's.
+  const lang = /^sv\b/i.test(req.headers["accept-language"] ?? "") ? "sv" : "en";
   wss.handleUpgrade(req, socket, head, (ws) => {
     const conn = new WsConnection(deviceId, ws);
-    room.add(conn);
+    // A socket joins a room only with its first message, and only a big screen's hello may
+    // start a new game: scanning codes or holding sockets open can't fill the server with rooms.
+    let room: RoomHost | null = null;
+    let deciding = false;
+    const early: string[] = [];
+    const silent = setTimeout(() => ws.close(CLOSE_SILENT, "No hello"), HELLO_TIMEOUT_MS);
+    const refuse = (message: string, code: number) => {
+      conn.send(JSON.stringify({ t: "error", message }));
+      ws.close(code);
+    };
+    const decide = async (first: string) => {
+      let r = await openRoom(id);
+      if (!r) {
+        let kind: unknown;
+        try {
+          kind = (JSON.parse(first) as { t?: unknown })?.t;
+        } catch {
+          /* not JSON */
+        }
+        if (kind !== "helloHost") return refuse(strings(lang).errors.noRoom, CLOSE_NO_ROOM);
+        r = createRoom(id, ip);
+        if (!r) return refuse(strings(lang).errors.busy, CLOSE_BUSY);
+      }
+      if (ws.readyState !== ws.OPEN) return;
+      const joined = r;
+      room = joined;
+      joined.add(conn);
+      for (const text of early.splice(0)) joined.run(() => joined.game.onMessage(text, conn));
+    };
     ws.on("pong", () => (conn.alive = true));
     ws.on("message", (data, isBinary) => {
       if (isBinary) return;
+      clearTimeout(silent);
       const text = data.toString();
-      room.run(() => room.game.onMessage(text, conn));
+      const r = room;
+      if (r) return r.run(() => r.game.onMessage(text, conn));
+      if (early.length < 8) early.push(text);
+      if (deciding) return;
+      deciding = true;
+      decide(text).catch((err) => {
+        log(`room ${id}: could not open`, err);
+        ws.terminate();
+      });
     });
-    ws.on("close", () => room.remove(conn));
+    ws.on("close", () => {
+      clearTimeout(silent);
+      room?.remove(conn);
+    });
     ws.on("error", () => ws.terminate());
   });
 });
@@ -337,6 +456,7 @@ async function shutdown(signal: string) {
   log(`${signal}: saving ${rooms.size} room(s) and shutting down`);
   clearInterval(heartbeat);
   clearInterval(sweeper);
+  clearInterval(forgetCreated);
   http.close();
   for (const ws of wss.clients) ws.close(1012, "Server restarting");
   await Promise.all([...rooms.values()].map((r) => r.close()));

@@ -198,6 +198,16 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 13.13 | Lobby | "Today's line-up" (Swedish "Dagens program") |
 | 13.6 | Lobby settings | Labelled rows (Rounds, Sprint format, Language + Look, Options); *More settings* opens an even three-column grid |
 
+## 14. Security hardening (unreleased)
+
+| # | Step | Expected |
+|---|------|----------|
+| 14.1 | On a phone, join a code no big screen has opened | "There's no game with that code…" (Swedish phones: "Det finns inget spel…"); back at the join form, no empty lobby |
+| 14.2 | Open `?screen=CODE` before the big screen exists, then start the game on the big screen | The extra screen shows the no-game message, then picks the game up by itself within a few seconds |
+| 14.3 | Mid-game, close a phone's tab and scan the QR again with the same name | Same player as before (rejoin still works) |
+| 14.4 | Deploy while a game from the previous version is running | Phones of that game reconnect as themselves |
+| 14.5 | After deploying, start a game and check the container logs | No "refused a new room" lines for normal use. If one shows up, the address it logs should be the real client address, not an ingress one |
+
 ## Known gaps to check while testing
 
 - A phone that rejoins from a *different browser* with the same name can only take over once the old connection is gone (up to ~20 s after the phone slept). Until then it gets "Name 2"; remove the stale one in the lobby.

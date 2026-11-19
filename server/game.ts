@@ -323,6 +323,10 @@ export class GameRoom {
       // Fill in fields that older saved games don't have.
       this.state = { ...freshState(), ...saved };
       this.state.settings = sanitizeSettings({ ...DEFAULT_SETTINGS, ...saved.settings });
+      this.state.aliases ??= {};
+      // Games saved before v0.8.2 used the device id as the player id: keep those devices working.
+      const aliased = new Set(Object.values(this.state.aliases));
+      for (const p of this.state.players) if (!aliased.has(p.id)) this.state.aliases[p.id] = p.id;
       this.state.players.forEach((p, i) => {
         // Nobody is connected right after a restart, but everyone gets the grace period to come back.
         p.connected = false;
@@ -425,7 +429,10 @@ export class GameRoom {
   onPlayerHello(conn: Connection, msg: Extract<ClientMessage, { t: "helloPlayer" }>) {
     const t = this.t();
     const s = this.state;
-    let p = this.player(s.aliases[conn.id] ?? conn.id);
+    // The device id is the phone's secret; the player id is public (views carry it).
+    // Only the alias table links the two, so knowing a player id gets you nowhere.
+    const known = Object.prototype.hasOwnProperty.call(s.aliases, conn.id) ? s.aliases[conn.id] : undefined;
+    let p = known ? this.player(known) : undefined;
     const audience = !!msg.audience;
     const name = clean(msg.name, 16);
     if (!p && name) {
@@ -437,7 +444,7 @@ export class GameRoom {
       );
       if (mine) {
         p = mine;
-        if (mine.id !== conn.id) s.aliases[conn.id] = mine.id;
+        s.aliases[conn.id] = mine.id;
       }
     }
     if (!p) {
@@ -456,10 +463,13 @@ export class GameRoom {
       ) {
         finalName = `${name} ${n++}`;
       }
+      let id = randomBytes(8).toString("hex");
+      while (this.player(id)) id = randomBytes(8).toString("hex");
+      s.aliases[conn.id] = id;
       p = {
-        id: conn.id,
+        id,
         name: finalName,
-        avatar: this.chooseAvatar(msg.avatar, audience, conn.id),
+        avatar: this.chooseAvatar(msg.avatar, audience, id),
         color: this.chooseColor(msg.color),
         connected: true,
         score: 0,
@@ -1145,6 +1155,7 @@ export class GameRoom {
     if (!this.onUsage) return;
     const s = this.state;
     const players = s.players.filter((p) => !p.audience).length;
+    const botIds = new Set(Object.entries(s.aliases).filter(([device]) => device.startsWith("bot-")).map(([, pid]) => pid));
     const base: UsageEvent = {
       event,
       at: new Date().toISOString(),
@@ -1152,7 +1163,7 @@ export class GameRoom {
       players,
       audience: s.players.length - players,
       // Test bots (scripts/bots.mjs) have device ids starting with "bot-": summaries leave those games out.
-      bots: s.players.filter((p) => p.id.startsWith("bot-")).length,
+      bots: s.players.filter((p) => botIds.has(p.id)).length,
       rounds: s.plan.length,
       lang: s.settings.lang,
       pack: s.settings.pack,
