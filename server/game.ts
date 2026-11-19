@@ -138,6 +138,8 @@ interface Matchup {
   callout?: MatchupView["callout"];
   /** Sides the game answered because the timer ran out. */
   auto?: boolean[];
+  /** When the answers are read aloud: ms after the voting screen appears that each card lands and is read. */
+  answerAt?: number[];
 }
 
 interface LashAnswer {
@@ -223,6 +225,10 @@ const AUDIENCE_GRACE_MS = 5000;
 /** Kudos cards: when the first lands, and the gap between them (longer when the voice reads them). */
 const KUDOS_FIRST_MS = 700;
 const KUDOS_FIRST_SPOKEN_MS = 2400;
+/** When answers are read aloud: the first card lands (and is read) this long after the voting screen appears. */
+const ANSWER_FIRST_MS = 1300;
+/** How long an answer card takes to fly in (src/game.css). */
+const CARD_FLY_MS = 700;
 const KUDOS_STEP_MS = 1800;
 /** How long the end of the kudos round waits for the last notes' clips. */
 const KUDOS_WAIT_MS = 3000;
@@ -280,6 +286,8 @@ export class GameRoom {
   private lastReaction = new Map<string, number>();
   /** When each offline player dropped (in memory: a restart gives everyone a fresh grace). */
   private droppedAt = new Map<string, number>();
+  /** When the current phase began (in memory: after a restart phones just show their result at once). */
+  private phaseAt = 0;
   private graceTimers = new Set<ReturnType<typeof setTimeout>>();
 
   /** timeScale < 1 speeds every timer up (used by the end-to-end test). */
@@ -410,7 +418,7 @@ export class GameRoom {
     }
 
     if (role === "host") return this.onHostMessage(msg);
-    if (pid) return this.onPlayerMessage(pid, msg);
+    if (pid) return this.onPlayerMessage(pid, msg, conn);
   }
 
   // ---------- big screen ----------
@@ -642,7 +650,7 @@ export class GameRoom {
 
   // ---------- player actions ----------
 
-  onPlayerMessage(playerId: string, msg: ClientMessage) {
+  onPlayerMessage(playerId: string, msg: ClientMessage, conn?: Connection) {
     const s = this.state;
     const round = this.round();
     const me = this.player(playerId);
@@ -665,7 +673,11 @@ export class GameRoom {
         for (const c of this.room.getConnections()) {
           const role = (c.state as ConnState)?.role;
           if (role === "host" || role === "screen") c.send(note);
-          if (this.pidOf(c) === playerId) c.setState(undefined);
+          if (this.pidOf(c) === playerId) {
+            // Another tab or device on the same player goes back to its join form too.
+            if (c !== conn) this.error(c, this.t().errors.leftElsewhere);
+            c.setState(undefined);
+          }
         }
         break;
       }
@@ -936,8 +948,12 @@ export class GameRoom {
     const round = this.round()!;
     // The first vote of a round gets a nudge; after that the prompt speaks for itself.
     const first = round.matchups.slice(0, s.matchupIndex).every((m) => !m.closed);
-    const lines = first ? [this.chatter(this.t().spoken.vote)] : [];
-    this.spokenPhase("voting", s.settings.voteSeconds * 1000, [...lines, ...this.answerLines(round)], 0);
+    const lead = first ? [this.chatter(this.t().spoken.vote)] : [];
+    const read = this.answerLines(round, lead);
+    const m = round.matchups[s.matchupIndex];
+    if (read) m.answerAt = read.at;
+    else delete m.answerAt;
+    this.spokenPhase("voting", s.settings.voteSeconds * 1000, [...lead, ...(read?.lines ?? [])], 0);
     if (this.expectedIds().length === 0 && this.connectedAudience().length === 0) this.endVoting();
   }
 
@@ -979,17 +995,44 @@ export class GameRoom {
   }
 
   /**
-   * The answers, read out once the cards have flown in. All or nothing: if one
-   * clip isn't ready, none are read, so no answer gets an unfair advantage.
-   * Emoji answers aren't read (the voice would spell out emoji names).
+   * The answers, read out one card at a time: the first card lands and is read,
+   * then "versus…" while the next card flies in, and so on. `at` is when each
+   * card lands (ms after the voting screen appears), for the big screen.
+   * All or nothing: if one clip isn't ready, none are read and the cards fly in
+   * on the usual beat, so no answer gets an unfair advantage. Emoji answers
+   * aren't read (the voice would spell out emoji names).
    */
-  answerLines(round: Round): TimedLine[] {
+  answerLines(round: Round, lead: TimedLine[] = []): { lines: TimedLine[]; at: number[] } | null {
     const m = round.matchups[this.state.matchupIndex];
-    if (!m || round.kind === "emoji" || !this.speech?.enabled || !this.state.settings.speech) return [];
-    const lines: TimedLine[] = m.answers
-      .filter((a): a is string => !!a)
-      .map((a, i) => ({ ...this.line(a), ...(i === 0 ? { at: 1300 } : {}) }));
-    return lines.every((l) => this.speech!.get(l, this.speechOpts())) ? lines : [];
+    const speech = this.speech;
+    if (!m || round.kind === "emoji" || !speech?.enabled || !this.state.settings.speech) return null;
+    if (m.answers.some((a) => !a)) return null;
+    const opts = this.speechOpts();
+    const answers = m.answers.map((a) => this.line(a!));
+    const clips = answers.map((l) => speech.get(l, opts));
+    if (!clips.every((c) => c)) return null;
+    // After the host's "time to vote" line, if it's said.
+    const leadMs = lead.reduce((sum, l) => sum + (speech.get(l, opts)?.ms ?? 0), 0);
+    let cursor = Math.max(ANSWER_FIRST_MS, leadMs ? leadMs + 300 : 0);
+    const lines: TimedLine[] = [];
+    const at: number[] = [];
+    answers.forEach((l, i) => {
+      if (i > 0) {
+        cursor += 250;
+        const vs = this.chatter(this.t().spoken.versus);
+        const c = speech.get(vs, opts);
+        if (c) {
+          lines.push({ ...vs, at: cursor });
+          cursor += c.ms + 150;
+        }
+        // Room for the card to fly in after the last one landed.
+        cursor = Math.max(cursor, at[i - 1] + CARD_FLY_MS + 200);
+      }
+      at.push(cursor);
+      lines.push({ ...l, at: cursor });
+      cursor += clips[i]!.ms;
+    });
+    return { lines, at };
   }
 
   /** A kudos note as the voice says it: "For Ada: thanks for the reviews". */
@@ -1289,6 +1332,7 @@ export class GameRoom {
 
   setPhase(phase: Phase, durationMs: number | null, say: SpeechClip[] | null = null) {
     this.state.phase = phase;
+    this.phaseAt = Date.now();
     this.state.say = say;
     this.state.deadline = durationMs === null ? null : Date.now() + durationMs * this.timeScale;
     this.state.pausedMs = null;
@@ -1469,6 +1513,7 @@ export class GameRoom {
       prompt: m.prompt,
       answers: m.answers.map((a) => a ?? ""),
     };
+    if (m.answerAt && !m.closed) view.answerAt = m.answerAt;
     if (reveal && m.closed) {
       const counts = tally(m.votes, m.answers.length);
       const names: string[][] = m.answers.map(() => []);
@@ -1719,8 +1764,15 @@ export class GameRoom {
       };
     }
     if (s.phase === "matchupResult") {
-      const r = myResult(round.matchups[s.matchupIndex], id, anon);
-      if (r) view.myResult = r;
+      const m = round.matchups[s.matchupIndex];
+      const r = myResult(m, id, anon);
+      if (r) {
+        view.myResult = r;
+        // Don't spoil it: the phone waits until the big screen has counted the votes in.
+        const total = tally(m.votes, m.answers.length).reduce((a, b) => a + b, 0);
+        const left = this.phaseAt + revealTiming(total).result - Date.now();
+        if (left > 0) view.resultInMs = left;
+      }
     }
     if (s.phase === "lashVoting") {
       const others = round.lashAnswers.filter((a) => a.playerId !== id);
@@ -1912,6 +1964,7 @@ function chatterLines(lang: Lang): string[] {
     ...s.welcome,
     ...Object.values(s.write).flat(),
     ...s.vote,
+    ...s.versus,
     ...Object.values(s.result).flat(),
     ...s.roundDone,
     ...Object.values(s.poll).flat(),

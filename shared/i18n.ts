@@ -26,6 +26,7 @@ const en = {
     audienceFull: "The audience is full.",
     gameFull: "This game is full. You can still join as audience.",
     kicked: "You were removed from the room.",
+    leftElsewhere: "You left the game in another tab. Join again to play.",
     hostTaken: "This room already has a big screen. Open it from the browser that started it, add this one as an extra screen, or start a new room.",
     noRoom: "There's no game with that code. Check the code on the big screen.",
     busy: "Too many new games right now. Try again in a few minutes.",
@@ -281,6 +282,8 @@ const en = {
       lastlash: ["Final round!", "Last one, and it counts!"],
     },
     vote: ["Time to vote! Pick your favourite.", "Voting time! Phones up.", "Now, vote for the best one!"],
+    /** Said between the answers when they are read aloud. */
+    versus: ["Versus…", "Or…", "Up against…"],
     result: {
       unanimous: ["Retrolash! A clean sweep!", "Total domination!", "Everybody agrees on that one!"],
       tie: ["It's a tie!", "Dead even!", "Can't split them!"],
@@ -339,6 +342,7 @@ const sv: Strings = {
     audienceFull: "Publiken är full.",
     gameFull: "Spelet är fullt. Du kan fortfarande gå med som publik.",
     kicked: "Du togs bort från rummet.",
+    leftElsewhere: "Du lämnade spelet i en annan flik. Gå med igen för att spela.",
     hostTaken: "Det här rummet har redan en storskärm. Öppna det från webbläsaren som startade det, lägg till den här som extra skärm, eller starta ett nytt rum.",
     noRoom: "Det finns inget spel med den koden. Kolla koden på storskärmen.",
     busy: "För många nya spel just nu. Försök igen om några minuter.",
@@ -591,6 +595,7 @@ const sv: Strings = {
       lastlash: ["Sista rundan!", "Sista frågan, och den räknas!"],
     },
     vote: ["Dags att rösta! Välj din favorit.", "Röstdags! Upp med telefonerna.", "Rösta nu på det bästa svaret!"],
+    versus: ["Mot…", "Eller…", "Kontra…"],
     result: {
       unanimous: ["Retrolash! Alla röster på ett svar!", "Total dominans!", "Där var alla överens!"],
       tie: ["Oavgjort!", "Helt jämnt!", "Omöjligt att skilja dem åt!"],

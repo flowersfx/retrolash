@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   deviceId,
+  idInUse,
   lastIdentity,
   normalizeCode,
   setDeviceId,
   setLastIdentity,
+  storedDeviceId,
   useCountdown,
+  useIdLock,
   useRoom,
   type LastIdentity,
 } from "./net";
@@ -84,13 +87,29 @@ export default function Play({ initialCode }: { initialCode: string }) {
   const [look, setLook] = useState<Look>(defaultLook);
   const [joined, setJoined] = useState(!!resume);
   const [audience, setAudience] = useState(!!resume?.audience);
+  // Before rejoining, make sure no other open tab in this browser is already this player.
+  const [checked, setChecked] = useState(!resume);
+  useEffect(() => {
+    if (checked) return;
+    void idInUse(initialCode, storedDeviceId(initialCode)).then((busy) => {
+      if (busy) {
+        setDeviceId(initialCode, crypto.randomUUID());
+        writeStore("session", joinedKey(initialCode), null);
+        setJoined(false);
+      }
+      setChecked(true);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const live = joined && checked;
+  useIdLock(code, live);
 
   const hello = useMemo<ClientMessage | null>(
     () => (joined ? { t: "helloPlayer", name, audience, avatar: look.avatar, color: look.color } : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [joined],
   );
-  const { view, receivedAt, error, connected, send } = useRoom<PlayerView>(joined ? code : null, hello);
+  const { view, receivedAt, error, connected, send } = useRoom<PlayerView>(live ? code : null, hello);
   const lang = view?.lang ?? deviceLang();
   useTheme(view?.theme);
 
@@ -125,22 +144,23 @@ export default function Play({ initialCode }: { initialCode: string }) {
   useEffect(() => {
     if (!view || view.you?.audience) return;
     if (["answering", "voting", "lashVoting"].includes(view.phase)) navigator.vibrate?.(60);
-    if (view.myResult?.kind === "author" && view.myResult.won) navigator.vibrate?.([80, 40, 80, 40, 160]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  const join = (asAudience: boolean, reuse?: LastIdentity) => {
+  const join = async (asAudience: boolean, reuse?: LastIdentity) => {
     if (code.length !== 4 || !(reuse || name.trim())) return;
     const last = lastIdentity(code);
+    // An identity another open tab is using stays that tab's: this one becomes someone new.
+    const free = async (id: string) => ((await idInUse(code, id)) ? crypto.randomUUID() : id);
     if (reuse) {
-      setDeviceId(code, reuse.id);
+      setDeviceId(code, await free(reuse.id));
       setName(reuse.name);
     } else {
       writeStore("local", NAME_KEY, name.trim());
       writeStore("local", LOOK_KEY, look);
       // Typing your own name again is "continue"; a different name is someone new.
       const same = last && last.name.toLowerCase() === name.trim().toLowerCase() && last.audience === asAudience;
-      setDeviceId(code, same ? last.id : crypto.randomUUID());
+      setDeviceId(code, same ? await free(last.id) : crypto.randomUUID());
     }
     writeStore("session", joinedKey(code), asAudience ? "audience" : "player");
     history.replaceState(null, "", `?room=${code}`);
@@ -148,6 +168,7 @@ export default function Play({ initialCode }: { initialCode: string }) {
     setJoined(true);
   };
 
+  if (joined && !checked) return null;
   if (!joined) {
     return (
       <LangContext.Provider value={lang}>
@@ -170,7 +191,7 @@ export default function Play({ initialCode }: { initialCode: string }) {
     <LangContext.Provider value={lang}>
       <main className={`phone ${vip ? "has-vip" : ""}`}>
         <PhoneHeader view={view} receivedAt={receivedAt} connected={connected} />
-        {!view ? <Waiting title={strings(lang).phone.connecting} /> : <PhoneStage key={phaseKey(view)} view={view} send={send} />}
+        {!view ? <Waiting title={strings(lang).phone.connecting} /> : <PhoneStage key={phaseKey(view)} view={view} receivedAt={receivedAt} send={send} />}
         {view?.phase === "lobby" && view.you && (
           // Leaving removes you from the room (the big screen says so); the join form comes back,
           // so this is also "not you? join as someone else".
@@ -213,7 +234,16 @@ function JoinForm({
   const t = useT();
   const ready = code.length === 4 && !!name.trim();
   const last = code.length === 4 ? lastIdentity(code) : null;
-  const canRejoin = !!last;
+  // Don't offer "Continue as …" for a player another open tab is playing right now.
+  const [busyId, setBusyId] = useState<string | null>(null);
+  useEffect(() => {
+    let on = true;
+    void idInUse(code, last?.id).then((busy) => on && setBusyId(busy ? last!.id : null));
+    return () => {
+      on = false;
+    };
+  }, [code, last?.id]);
+  const canRejoin = !!last && busyId !== last.id;
   return (
     <main className="phone">
       <h1 className="logo">
@@ -434,7 +464,7 @@ function VipBar({ view, send }: { view: PlayerView; send: Send }) {
   );
 }
 
-function PhoneStage({ view, send }: { view: PlayerView; send: Send }) {
+function PhoneStage({ view, receivedAt, send }: { view: PlayerView; receivedAt: number; send: Send }) {
   const t = useT();
   const audience = !!view.you?.audience;
   const rank = view.myRank ? t.phone.rank(view.myRank.rank, view.myRank.of, view.myRank.score) : undefined;
@@ -459,7 +489,7 @@ function PhoneStage({ view, send }: { view: PlayerView; send: Send }) {
     case "voting":
       return <Vote view={view} send={send} />;
     case "matchupResult":
-      return <MyResultCard view={view} send={send} />;
+      return <MyResultCard view={view} receivedAt={receivedAt} send={send} />;
     case "lashVoting":
       return <LashVote view={view} send={send} />;
     case "lashResult":
@@ -510,10 +540,22 @@ function LobbyWait({ view, send }: { view: PlayerView; send: Send }) {
   );
 }
 
-function MyResultCard({ view, send }: { view: PlayerView; send: Send }) {
+function MyResultCard({ view, receivedAt, send }: { view: PlayerView; receivedAt: number; send: Send }) {
   const t = useT();
   const r = view.myResult;
-  if (!r) return <Waiting title={t.phone.eyesUp} send={send} />;
+  // Wait for the big screen to count the votes in before telling this phone how it went.
+  const revealAt = receivedAt + (view.resultInMs ?? 0);
+  const [shown, setShown] = useState(() => Date.now() >= revealAt);
+  useEffect(() => {
+    if (shown) return;
+    const id = setTimeout(() => setShown(true), Math.max(0, revealAt - Date.now()));
+    return () => clearTimeout(id);
+  }, [shown, revealAt]);
+  const won = r?.kind === "author" && r.won;
+  useEffect(() => {
+    if (shown && won) navigator.vibrate?.([80, 40, 80, 40, 160]);
+  }, [shown, won]);
+  if (!r || !shown) return <Waiting title={t.phone.eyesUp} send={send} />;
   if (r.kind === "voter") {
     const title = r.pickedWinner === null ? t.phone.tieVoter : r.pickedWinner ? t.phone.pickedWinner : t.phone.pickedLoser;
     return <Waiting title={title} sub={t.phone.lookBigScreen} send={send} />;

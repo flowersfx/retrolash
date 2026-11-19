@@ -185,6 +185,8 @@ export interface MatchupView {
   authors?: string[];
   /** Authors' plates, only in non-anonymous mode after voting. */
   authorPlates?: (VoterView | null)[];
+  /** When the answers are read aloud: ms after the voting screen appears that each card should have landed. */
+  answerAt?: number[];
   /** Vote counts per side, only after voting closes. */
   votes?: number[];
   /** Who voted for each side (names), only in non-anonymous mode after voting. */
@@ -414,6 +416,8 @@ export interface PlayerView {
   };
   /** matchupResult: how it went for me. */
   myResult?: MyResult;
+  /** matchupResult: ms until the big screen shows the winner; keep myResult to yourself until then. */
+  resultInMs?: number;
   /** roundResult / podium / summary, non-anonymous players only. */
   myRank?: { rank: number; of: number; score: number };
   /** Voting phase (last lash). */

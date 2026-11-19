@@ -115,6 +115,7 @@ const spokenPhases = new Set();
 let clipUrl = null;
 let maxSides = 0;
 let answersRead = 0;
+let versusMissing = 0;
 let kudosRead = 0;
 ws.onmessage = (e) => {
   const msg = JSON.parse(e.data);
@@ -150,7 +151,14 @@ ws.onmessage = (e) => {
   if (v.matchup) maxSides = Math.max(maxSides, v.matchup.answers.length);
   // Answers read aloud while voting: one clip per answer (plus maybe the "time to vote" nudge).
   if (v.phase === "pollResult" && v.kudos && v.kudosAt) kudosRead = Math.max(kudosRead, (v.say ?? []).filter((c) => c.at !== undefined).length);
-  if (v.phase === "voting" && v.roundKind !== "emoji" && (v.say?.length ?? 0) >= v.matchup.answers.length) answersRead++;
+  if (v.phase === "voting" && v.roundKind !== "emoji" && (v.say?.length ?? 0) >= v.matchup.answers.length) {
+    answersRead++;
+    // One card at a time: each lands as its answer is read, with "versus" between them.
+    const at = v.matchup.answerAt;
+    if (!at || at.length !== v.matchup.answers.length || at.some((x, i) => i > 0 && x <= at[i - 1] + 700))
+      fail(`read answers need staggered card times: ${JSON.stringify(at)}`);
+    if (v.say.length < 2 * v.matchup.answers.length - 1) versusMissing++;
+  }
   if (v.phase === "lashResult") lashTitle = v.roundTitle;
   if (v.phase === "summary") void check(v);
 };
@@ -198,6 +206,7 @@ async function check(v) {
   }
   console.log(`speech: clips on ${[...spokenPhases].join(", ")}; answers read aloud in ${answersRead} votes`);
   if (answersRead === 0) fail("answers were never read aloud");
+  if (versusMissing > answersRead / 2) fail(`"versus" missing between read answers in ${versusMissing} of ${answersRead} votes`);
   if (kudosRead !== PLAYERS) fail(`expected all ${PLAYERS} kudos read aloud, got ${kudosRead}`);
 
   // Player ids are public (every view has them) and must not work as a login.

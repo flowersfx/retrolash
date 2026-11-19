@@ -1214,6 +1214,8 @@ interface Token {
 }
 
 /** Where each card flies in from: left and right, and the middle one of three from below. */
+/** How long an answer card takes to fly in (game.css). */
+const CARD_FLY_MS = 700;
 const FLY = { 2: ["fly-left", "fly-right"], 3: ["fly-left", "fly-up", "fly-right"] } as Record<number, string[]>;
 
 /**
@@ -1302,6 +1304,10 @@ function Matchup({
   const emoji = kind === "emoji";
   const plates = order.some((tk) => tk.voter);
   const out = pick(OUTS, `${m.id}:ko`);
+  // Answers read aloud: each card flies in to land as its answer is read (the VS with the second).
+  const landAt = !reveal && m.answerAt?.length === sides ? m.answerAt : null;
+  const flyDelay = (i: number): CSSProperties | undefined =>
+    landAt ? { animationDelay: `${Math.max(0, landAt[i] - CARD_FLY_MS)}ms` } : undefined;
 
   return (
     <div className="matchup">
@@ -1327,6 +1333,7 @@ function Matchup({
                 lash && isWinner ? "champion" : "",
                 lash && isLoser ? `gone out-${out}` : "",
               ].join(" ")}
+              style={flyDelay(i)}
             >
               <p className={`answer-text ${emoji ? "emoji-answer" : ""}`}>
                 {m.answers[i] || <span className="muted">{t.stage.noAnswer}</span>}
@@ -1368,7 +1375,11 @@ function Matchup({
             </div>
           );
         })}
-        {sides === 2 && <div className="vs">VS</div>}
+        {sides === 2 && (
+          <div className={`vs ${landAt ? "vs-late" : ""}`} style={landAt ? { animationDelay: `${Math.max(0, landAt[1] - CARD_FLY_MS)}ms` } : undefined}>
+            VS
+          </div>
+        )}
       </div>
       {final && !!m.skips && <p className="muted skips slide-up">{t.stage.skips(m.skips)}</p>}
       {reveal && plates && !final && (

@@ -76,6 +76,48 @@ export function deviceId(code: string) {
   }
 }
 
+/** The id this tab would use, without making one: its own, else the last identity in this room. */
+export function storedDeviceId(code: string): string | null {
+  try {
+    return sessionStorage.getItem(`retrolash:id:${code}`) ?? lastIdentity(code)?.id ?? null;
+  } catch {
+    return memoryId ?? lastIdentity(code)?.id ?? null;
+  }
+}
+
+// Each joined tab holds a Web Lock named after its device id, for as long as it
+// lives. A new tab only picks up the last identity if no other open tab holds it:
+// otherwise two desktop tabs silently become one player, and "Leave" in one of
+// them removes the player from under the other. A phone whose sleeping tab was
+// thrown away holds nothing, so it still rejoins. Needs a secure context; where
+// Web Locks are missing (plain-http LAN dev) this says "not in use".
+const lockName = (code: string, id: string) => `retrolash:tab:${code}:${id}`;
+
+export async function idInUse(code: string, id: string | null | undefined): Promise<boolean> {
+  if (!id || !navigator.locks) return false;
+  try {
+    const q = await navigator.locks.query();
+    return !!q.held?.some((l) => l.name === lockName(code, id));
+  } catch {
+    return false;
+  }
+}
+
+/** Hold this tab's identity lock while `active`. */
+export function useIdLock(code: string, active: boolean) {
+  useEffect(() => {
+    if (!active || !navigator.locks) return;
+    const ctl = new AbortController();
+    let release = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    navigator.locks.request(lockName(code, deviceId(code)), { signal: ctl.signal }, () => held).catch(() => {});
+    return () => {
+      ctl.abort();
+      release();
+    };
+  }, [code, active]);
+}
+
 /** Reuse an earlier id in this tab ("Continue as …" after the tab was closed). */
 export function setDeviceId(code: string, id: string) {
   memoryId = id;

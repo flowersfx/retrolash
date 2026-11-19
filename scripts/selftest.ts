@@ -298,6 +298,16 @@ for (const n of [3, 4, 7, 8, 9, 10, 11, 16]) {
   g.onMessage(JSON.stringify({ t: "leave" }), ps[3]);
   assert.equal(g.player(dId), undefined, "D left");
   assert.ok(h.sent.some((m) => m.t === "left" && m.name === "D") && tv.sent.some((m) => m.t === "left"), "big screens are told");
+  // Two tabs on one identity (a second tab picked up the last one): leaving in one
+  // must send the other back to the join form, not leave it on a stale lobby.
+  const e1 = join("E", { t: "helloPlayer", name: "E" });
+  const e2 = join("E", { t: "helloPlayer", name: "E" });
+  assert.equal(g.pidOf(e1), g.pidOf(e2), "same device id, same player");
+  g.onMessage(JSON.stringify({ t: "leave" }), e2);
+  assert.equal(e1.sent.at(-1)?.t, "error", "the other tab on that player is told it's gone");
+  assert.notEqual(e2.sent.at(-1)?.t, "error", "the tab that left just goes back to the form");
+  cs.splice(cs.indexOf(e1), 1);
+  cs.splice(cs.indexOf(e2), 1);
   g.onMessage(JSON.stringify({ t: "settings", settings: { rounds: ["warmup"] } }), h);
   g.onMessage(JSON.stringify({ t: "start" }), h);
   g.onMessage(JSON.stringify({ t: "leave" }), ps[0]);

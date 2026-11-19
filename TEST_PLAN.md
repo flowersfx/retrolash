@@ -211,6 +211,17 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 14.7 | (v0.8.4) Edit an answer a few times quickly, then let everyone finish | The final version is read aloud during voting, as before. Answers submitted in the last seconds are still read |
 | 14.8 | (v0.8.4) After a real game, look at the usage line (`npx tsx scripts/usage.ts usage.jsonl`) | `speechChars` is well under 6000 + 3000 × players. If it's close, raise the budget |
 
+## 15. Tabs, versus and the phone result (v0.8.5)
+
+| # | Step | Expected |
+|---|------|----------|
+| 15.1 | Join from one browser tab, then open the room in a second and a third tab of the same browser | Each new tab shows the join form (no "Continue as …" for a player another tab is playing). Join with different names: the big screen shows all three |
+| 15.2 | In one of those tabs, press "Leave the game" and join again with a new name | Only that tab's player leaves; the others stay on the big screen. A tab that shared the player (older clients) goes back to the join form with "You left the game in another tab" |
+| 15.3 | Reload a player tab, and on a phone let the screen sleep until the tab is dropped, then scan again | Both rejoin as the same player |
+| 15.4 | With speech on, watch a Warm-up or Sprint vote | The first card lands and is read, then "Versus…" (or "Or…") while the next card flies in and is read; in three-way matchups the third follows the same way |
+| 15.5 | With speech off (or the emoji round) | Cards fly in on the usual quick beat |
+| 15.6 | When a vote closes, watch a phone and the big screen together | Phones say "Eyes on the big screen" until the big screen has counted the votes in, then show won / lost / picked the winner (and buzz on a win) |
+
 ## Known gaps to check while testing
 
 - A phone that rejoins from a *different browser* with the same name can only take over once the old connection is gone (up to ~20 s after the phone slept). Until then it gets "Name 2"; remove the stale one in the lobby.
