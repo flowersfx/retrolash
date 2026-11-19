@@ -140,14 +140,32 @@ export function useRoom<V extends View>(
 
     // A phone that slept often keeps a socket that looks open but is dead, and the
     // reconnect backoff may be long by then. Coming back to the page reconnects now.
+    // An open-looking socket is checked first instead of being dropped: a needless
+    // reconnect briefly makes the player "offline" (switching tabs did that in v0.6).
     let hiddenAt = 0;
+    let probe: ReturnType<typeof setTimeout> | null = null;
+    const answered = () => {
+      if (probe) clearTimeout(probe);
+      probe = null;
+    };
+    ws.addEventListener("message", answered);
     const wake = () => {
       if (document.visibilityState === "hidden") {
         hiddenAt = Date.now();
         return;
       }
       const away = hiddenAt ? Date.now() - hiddenAt : 0;
-      if (ws.readyState !== WebSocket.OPEN || away > 15_000) ws.reconnect();
+      if (ws.readyState !== WebSocket.OPEN) return ws.reconnect();
+      if (away < 15_000 || probe) return;
+      // Saying hello again is harmless and the server always answers with a view.
+      const h = helloRef.current;
+      const msg = typeof h === "function" ? h() : h;
+      if (!msg) return;
+      ws.send(JSON.stringify(msg));
+      probe = setTimeout(() => {
+        probe = null;
+        ws.reconnect();
+      }, 4000);
     };
     const onPageShow = (e: PageTransitionEvent) => e.persisted && ws.reconnect();
     const onOnline = () => ws.readyState !== WebSocket.OPEN && ws.reconnect();
@@ -158,6 +176,8 @@ export function useRoom<V extends View>(
       ws.removeEventListener("open", onOpen);
       ws.removeEventListener("close", onClose);
       ws.removeEventListener("message", onMessage);
+      ws.removeEventListener("message", answered);
+      answered();
       document.removeEventListener("visibilitychange", wake);
       window.removeEventListener("pageshow", onPageShow);
       window.removeEventListener("online", onOnline);

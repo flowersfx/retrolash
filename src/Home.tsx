@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { normalizeCode } from "./net";
+import { BigScreenArt, PhoneArt } from "./Illustrations";
 
 export default function Home({
   onHost,
@@ -19,14 +20,16 @@ export default function Home({
       </p>
       <div className="home-cards">
         <section className="card">
-          <h2>📺 On the meeting-room screen</h2>
+          <BigScreenArt />
+          <h2>On the meeting-room screen</h2>
           <p>Start a room and put it on the big screen. Everyone joins with their phone.</p>
           <button className="btn big" onClick={onHost}>
             Host a retro
           </button>
         </section>
         <section className="card">
-          <h2>📱 On your phone</h2>
+          <PhoneArt />
+          <h2>On your phone</h2>
           <form
             onSubmit={(e) => {
               e.preventDefault();

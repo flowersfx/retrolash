@@ -23,7 +23,8 @@ const pick = (a) => a[Math.floor(Math.random() * a.length)];
 const AVATARS = ["🦊", "🐙", "🦉", "🐸", "🦄", "🐝", "🐳", "🦖", "🐧", "🦔", "🐢", "🦩"];
 const COLORS = ["#ffcf33", "#ff5ca8", "#3ee0c5", "#7c8cff", "#ff8a3d", "#9be15d", "#c77dff", "#4cc9f0"];
 const KUDOS = ["Thanks for the code reviews", "Saved the demo", "Best rubber duck", "Kept us calm"];
-const delay = () => 300 + Math.random() * 1500;
+// BOT_DELAY=ms adds a pause before every action (to look at the waiting screens).
+const delay = () => Number(process.env.BOT_DELAY ?? 0) + 300 + Math.random() * 1500;
 
 function bot(i, audience) {
   const id = `bot-${code}-${audience ? "a" : "p"}${i}`;

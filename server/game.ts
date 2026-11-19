@@ -18,6 +18,7 @@ import {
   MAX_PREVIOUS_ITEMS,
   MIN_PLAYERS,
   MOODS,
+  NO_TALK,
   PACKS,
   PLATE_COLORS,
   REACTIONS,
@@ -197,6 +198,12 @@ const FOLLOWUP_RESULT_MIN_MS = 20000;
 const PODIUM_MS = 15000;
 /** When all players are done but the audience isn't, give them this long. */
 const AUDIENCE_GRACE_MS = 5000;
+/**
+ * A player whose phone drops (screen off, app switch, reconnect, server restart)
+ * is still waited for this long. Without it, a phone blinking offline for a
+ * second while everyone else had answered ended the round early.
+ */
+const DROP_GRACE_MS = 45_000;
 const REACTION_GAP_MS = 500;
 const MAX_CLAIMABLE = 5;
 
@@ -243,6 +250,9 @@ export class GameRoom {
   state: GameState = freshState();
   timer: ReturnType<typeof setTimeout> | null = null;
   private lastReaction = new Map<string, number>();
+  /** When each offline player dropped (in memory: a restart gives everyone a fresh grace). */
+  private droppedAt = new Map<string, number>();
+  private graceTimers = new Set<ReturnType<typeof setTimeout>>();
 
   /** timeScale < 1 speeds every timer up (used by the end-to-end test). */
   constructor(
@@ -268,6 +278,28 @@ export class GameRoom {
   dispose() {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.graceTimers.forEach(clearTimeout);
+    this.graceTimers.clear();
+  }
+
+  /** Start someone's grace period, and look again once it's over. */
+  dropped(id: string) {
+    this.droppedAt.set(id, Date.now());
+    const t = setTimeout(() => {
+      this.graceTimers.delete(t);
+      this.checkAllDone();
+      this.commit();
+    }, DROP_GRACE_MS * this.timeScale + 50);
+    this.graceTimers.add(t);
+  }
+
+  /** Connected, or dropped out only moments ago: still expected to answer and vote. */
+  present(id: string) {
+    const p = this.player(id);
+    if (!p) return false;
+    if (p.connected) return true;
+    const at = this.droppedAt.get(id);
+    return at !== undefined && Date.now() - at < DROP_GRACE_MS * this.timeScale;
   }
 
   async onStart() {
@@ -277,9 +309,10 @@ export class GameRoom {
       this.state = { ...freshState(), ...saved };
       this.state.settings = sanitizeSettings({ ...DEFAULT_SETTINGS, ...saved.settings });
       this.state.players.forEach((p, i) => {
-        // Nobody is connected right after a restart.
+        // Nobody is connected right after a restart, but everyone gets the grace period to come back.
         p.connected = false;
         p.color ??= PLATE_COLORS[i % PLATE_COLORS.length];
+        if (!p.audience) this.dropped(p.id);
       });
       this.armTimer();
     }
@@ -308,7 +341,10 @@ export class GameRoom {
     if (pid) {
       const stillOpen = [...this.room.getConnections()].some((c) => c !== conn && this.pidOf(c) === pid);
       const p = this.player(pid);
-      if (p && !stillOpen) p.connected = false;
+      if (p && !stillOpen) {
+        p.connected = false;
+        if (!p.audience) this.dropped(p.id);
+      }
       this.checkAllDone();
       this.commit();
     }
@@ -415,6 +451,7 @@ export class GameRoom {
       this.state.players.push(p);
     }
     p.connected = true;
+    this.droppedAt.delete(p.id);
     conn.setState({ role: "player", pid: p.id });
     this.commit();
   }
@@ -455,7 +492,7 @@ export class GameRoom {
     const msg: ServerMessage = {
       t: "reaction",
       emoji,
-      ...(this.state.settings.anonymous ? {} : { avatar: p.avatar }),
+      ...(this.state.settings.anonymous ? {} : { avatar: p.avatar, from: p.id }),
     };
     const data = JSON.stringify(msg);
     for (const c of this.room.getConnections()) {
@@ -576,6 +613,20 @@ export class GameRoom {
     }
 
     switch (msg.t) {
+      case "leave": {
+        // Only in the lobby: mid-game the matchups count on everyone.
+        if (s.phase !== "lobby") return;
+        s.players = s.players.filter((p) => p.id !== playerId);
+        for (const [device, pid] of Object.entries(s.aliases)) if (pid === playerId) delete s.aliases[device];
+        this.droppedAt.delete(playerId);
+        const note = JSON.stringify({ t: "left", name: me.name } satisfies ServerMessage);
+        for (const c of this.room.getConnections()) {
+          const role = (c.state as ConnState)?.role;
+          if (role === "host" || role === "screen") c.send(note);
+          if (this.pidOf(c) === playerId) c.setState(undefined);
+        }
+        break;
+      }
       case "profile": {
         me.avatar = this.chooseAvatar(msg.avatar, audience, playerId);
         me.color = this.chooseColor(msg.color);
@@ -593,6 +644,8 @@ export class GameRoom {
             : clean(msg.text, MAX_ANSWER_LENGTH);
         if (!text) return;
         m.answers[idx] = text;
+        // Start making the clip now, so it's ready when this matchup is voted on.
+        if (round.kind !== "emoji") this.prefetchSpeech([text]);
         break;
       }
       case "lashAnswers": {
@@ -716,7 +769,8 @@ export class GameRoom {
   beginAnswering() {
     const round = this.round()!;
     if (isHeadToHead(round.kind)) {
-      const players = shuffle(this.connectedPlayers());
+      // Someone reconnecting right now (a phone waking up) still gets prompts.
+      const players = shuffle(this.state.players.filter((p) => !p.audience && this.present(p.id)));
       // Head-to-head needs two people; skip the round if everyone else left.
       if (players.length < 2) return this.nextRound();
       const groups = groupPlayers(
@@ -772,6 +826,7 @@ export class GameRoom {
       return this.spokenPhase("lashVoting", ms, [this.chatter(say.lashVote)], 0);
     }
     this.fillMissing(round);
+    if (round.kind !== "emoji") this.prefetchSpeech(round.matchups.flatMap((m) => m.answers.filter((a): a is string => !!a)));
     this.state.matchupIndex = 0;
     this.beginVoting();
   }
@@ -815,7 +870,7 @@ export class GameRoom {
     // The first vote of a round gets a nudge; after that the prompt speaks for itself.
     const first = round.matchups.slice(0, s.matchupIndex).every((m) => !m.closed);
     const lines = first ? [this.chatter(this.t().spoken.vote)] : [];
-    this.spokenPhase("voting", s.settings.voteSeconds * 1000, lines, 0);
+    this.spokenPhase("voting", s.settings.voteSeconds * 1000, [...lines, ...this.answerLines(round)], 0);
     if (this.expectedIds().length === 0 && this.connectedAudience().length === 0) this.endVoting();
   }
 
@@ -850,10 +905,30 @@ export class GameRoom {
     });
     m.callout = this.callout(m, winner, before);
     this.prefetchWinner();
-    // Sprint results pause for discussion (timed unless set to "wait for me").
+    // Sprint results pause for discussion (timed unless set to "wait for me"; "0 s" is just the short cooldown).
     const d = s.settings.discussionSeconds;
-    const ms = round.kind === "retro" ? (d === 0 ? null : d * 1000) : QUICK_RESULT_MS;
+    const ms = round.kind !== "retro" || d === NO_TALK ? QUICK_RESULT_MS : d === 0 ? null : d * 1000;
     this.spokenPhase("matchupResult", ms, this.resultLines(m, counts, winner), 600);
+  }
+
+  /**
+   * The answers, read out once the cards have flown in. All or nothing: if one
+   * clip isn't ready, none are read, so no answer gets an unfair advantage.
+   * Emoji answers aren't read (the voice would spell out emoji names).
+   */
+  answerLines(round: Round): TimedLine[] {
+    const m = round.matchups[this.state.matchupIndex];
+    if (!m || round.kind === "emoji" || !this.speech?.enabled || !this.state.settings.speech) return [];
+    const lines: TimedLine[] = m.answers
+      .filter((a): a is string => !!a)
+      .map((a, i) => ({ ...this.line(a), ...(i === 0 ? { at: 1300 } : {}) }));
+    return lines.every((l) => this.speech!.get(l)) ? lines : [];
+  }
+
+  /** Queue player text for speech (when the room has speech on). */
+  prefetchSpeech(texts: string[]) {
+    if (!this.speech?.enabled || !this.state.settings.speech) return;
+    this.speech.prefetch(texts.map((t) => this.line(t)));
   }
 
   /** A word from the host as the result lands on screen. */
@@ -1208,11 +1283,11 @@ export class GameRoom {
     const s = this.state;
     const round = this.round();
     if (!round) return [];
-    const everyone = () => this.connectedPlayers().map((p) => p.id);
+    const everyone = () => this.state.players.filter((p) => !p.audience && this.present(p.id)).map((p) => p.id);
     if (s.phase === "answering") {
       if (!isHeadToHead(round.kind)) return everyone();
       const ids = new Set(round.matchups.flatMap((m) => m.playerIds));
-      return [...ids].filter((id) => this.isConnected(id));
+      return [...ids].filter((id) => this.present(id));
     }
     if (s.phase === "voting") {
       const m = round.matchups[s.matchupIndex];
@@ -1582,7 +1657,7 @@ function isLibraryText(text: string) {
     const set = new Set<string>(Object.values(DEFAULT_LASH_PROMPT));
     for (const lang of LANGS) {
       const p = prompts(lang);
-      for (const list of [p.warmup, p.retro, p.emoji, ...Object.values(p.packs)]) list.forEach((x) => set.add(x));
+      for (const list of [p.warmup, p.retro, p.emoji, p.safetyQuips, ...Object.values(p.packs)]) list.forEach((x) => set.add(x));
       for (const kind of [...TOGGLEABLE_ROUNDS, "followup" as const])
         for (let total = 1; total <= 3; total++)
           for (let i = 0; i < total; i++) set.add(roundTitle(kind, i, total, lang));
@@ -1627,7 +1702,7 @@ function sanitizeSettings(s: Settings): Settings {
       .map((p) => clean(p, len))
       .filter(Boolean)
       .slice(0, max);
-  const discussion = clamp(s.discussionSeconds, 0, 600, DEFAULT_SETTINGS.discussionSeconds);
+  const discussion = clamp(s.discussionSeconds, NO_TALK, 600, DEFAULT_SETTINGS.discussionSeconds);
   const lang = LANGS.includes(s.lang) ? s.lang : DEFAULT_SETTINGS.lang;
   return {
     anonymous: !!s.anonymous,
@@ -1640,7 +1715,7 @@ function sanitizeSettings(s: Settings): Settings {
     lashVotes: clamp(s.lashVotes, 1, 5, DEFAULT_SETTINGS.lashVotes),
     sprintRounds: clamp(s.sprintRounds, 0, 3, DEFAULT_SETTINGS.sprintRounds),
     // Under 15 s is too short to talk; treat it as "wait for me" only when 0.
-    discussionSeconds: discussion === 0 ? 0 : Math.max(15, discussion),
+    discussionSeconds: discussion <= 0 ? discussion : Math.max(15, discussion),
     previousItems: list(s.previousItems, MAX_PREVIOUS_ITEMS, MAX_LASH_LENGTH),
     lang,
     pack: PACKS.includes(s.pack) ? s.pack : DEFAULT_SETTINGS.pack,

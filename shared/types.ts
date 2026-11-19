@@ -39,7 +39,7 @@ export interface Settings {
   lashVotes: number;
   /** Number of "The Sprint" rounds. 0 = automatic (based on player count). */
   sprintRounds: number;
-  /** Discussion time after each Sprint matchup. 0 = wait for the facilitator. */
+  /** Discussion time after each Sprint matchup. 0 = wait for the facilitator, NO_TALK = no pause. */
   discussionSeconds: number;
   /** Last retro's action items, revisited in a "Did we do it?" round. */
   previousItems: string[];
@@ -58,6 +58,9 @@ export interface Settings {
 /** "studio": calmer colours for meeting rooms. "party": the original neon look. */
 export type ThemeId = "studio" | "party";
 export const THEMES: ThemeId[] = ["studio", "party"];
+/** discussionSeconds value for "0 s": Sprint results move on after the same short cooldown as the Warm-up. */
+export const NO_TALK = -1;
+
 /** From this many players, head-to-head rounds use three-way matchups (when Settings.trios is on). */
 export const TRIO_MIN_PLAYERS = 8;
 
@@ -425,7 +428,10 @@ export type ServerMessage =
   | { t: "view"; view: HostView | PlayerView }
   | { t: "error"; message: string }
   /** Sent to the big screen only. */
-  | { t: "reaction"; emoji: string; avatar?: string }
+  /** `from` (the player's id) lets the big screen float it up from their avatar; left out in anonymous mode. */
+  | { t: "reaction"; emoji: string; avatar?: string; from?: string }
+  /** Big screens: someone left the lobby from their phone. */
+  | { t: "left"; name: string }
   /** To the first big screen of a room: keep this to reconnect as the host. */
   | { t: "hostToken"; token: string };
 
@@ -435,6 +441,8 @@ export type ClientMessage =
   | { t: "helloScreen" }
   | { t: "helloPlayer"; name: string; audience?: boolean; avatar?: string; color?: string }
   | { t: "profile"; avatar: string; color: string }
+  /** Leave the room for good (lobby only). */
+  | { t: "leave" }
   | { t: "settings"; settings: Partial<Settings> }
   | { t: "start" }
   | { t: "next" }

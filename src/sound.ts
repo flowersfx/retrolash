@@ -228,44 +228,198 @@ export const sfx = {
 };
 
 // ---------- background music ----------
-// A mellow four-chord loop: soft pads, a walking bass, brushed hats and a
-// little arpeggio. Scheduled a few hundred ms ahead so it never stutters.
+// A handful of lofi tracks, synthesised live: swung drums, a soft e-piano,
+// warm pads, round bass and vinyl crackle, all through a gentle low-pass
+// ("tape") filter. The big screen picks a scene from what's happening; each
+// scene has one or more tracks that take turns. Changes land on a bar line, so
+// nothing stutters. Notes are scheduled a few hundred ms ahead.
 
-const BPM = 96;
-const EIGHTH = 60 / BPM / 2;
-// Am7, Dm9, G7, Cmaj7 as MIDI notes.
-const CHORDS = [
-  [57, 60, 64, 67],
-  [50, 57, 60, 64],
-  [55, 59, 62, 65],
-  [48, 55, 59, 64],
-];
-const ARP = [0, 2, 1, 3, 2, 1, 3, 0];
+interface Track {
+  name: string;
+  bpm: number;
+  /** How late the off-beat 16ths come, as a share of a 16th. */
+  swing: number;
+  /** One chord per bar, MIDI notes, root first. */
+  chords: number[][];
+  /** 16th steps (0–15) within each bar. */
+  kick: number[];
+  snare: number[];
+  hat: number[];
+  /** E-piano stabs of the chord. */
+  keys: number[];
+  /** Bass: the root, and the fifth on every second hit. */
+  bass: number[];
+  /** A chord note an octave or two up, walking through the chord. */
+  arp?: number[];
+  /** A soft pad held through each bar. */
+  pad?: boolean;
+  /** Vinyl crackle: chance of a click on each 16th. */
+  crackle: number;
+}
+
+export type MusicScene = "lobby" | "writing" | "show" | "talk" | "finale";
+
+const TRACKS: Record<string, Track> = {
+  // Lobby and between rounds: easy coffee-shop groove.
+  coffee: {
+    name: "Coffee Shop",
+    bpm: 80,
+    swing: 0.18,
+    chords: [[53, 57, 60, 64], [52, 55, 59, 62], [50, 57, 60, 64], [48, 55, 59, 64]], // Fmaj7 Em7 Dm9 Cmaj7
+    kick: [0, 7, 10],
+    snare: [4, 12],
+    hat: [0, 2, 4, 6, 8, 10, 12, 14],
+    keys: [0, 6],
+    bass: [0, 7, 10],
+    crackle: 0.25,
+  },
+  // Writing answers: sparse and half-time, so people can think.
+  desk: {
+    name: "Desk Lamp",
+    bpm: 70,
+    swing: 0.12,
+    chords: [[45, 55, 59, 64], [41, 57, 60, 64], [48, 55, 59, 64], [43, 55, 59, 64]], // Am9 Fmaj7 Cmaj7 G6
+    kick: [0, 10],
+    snare: [8],
+    hat: [0, 4, 8, 12],
+    keys: [0],
+    bass: [0, 8],
+    arp: [2, 6, 10, 14],
+    pad: true,
+    crackle: 0.2,
+  },
+  // Matchups and votes: a bit more push.
+  nightbus: {
+    name: "Night Bus",
+    bpm: 88,
+    swing: 0.2,
+    chords: [[50, 57, 60, 65], [43, 59, 64, 65], [48, 59, 62, 64], [45, 61, 67, 70]], // Dm9 G13 Cmaj9 A7b9
+    kick: [0, 3, 8, 11],
+    snare: [4, 12],
+    hat: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    keys: [0, 3, 10],
+    bass: [0, 3, 8, 10, 14],
+    arp: [1, 5, 9, 13],
+    crackle: 0.15,
+  },
+  // Discussion pauses: no drums, just a slow, quiet pad.
+  rain: {
+    name: "Rain on the Window",
+    bpm: 64,
+    swing: 0,
+    chords: [[51, 58, 62, 67], [50, 57, 60, 65], [48, 55, 58, 63], [46, 57, 62, 65]], // Ebmaj7 Dm7 Cm7 Bbmaj7
+    kick: [],
+    snare: [],
+    hat: [],
+    keys: [0],
+    bass: [0],
+    arp: [4, 12],
+    pad: true,
+    crackle: 0.35,
+  },
+  // Highlights, podium, summary: brighter, a little celebratory.
+  golden: {
+    name: "Golden Hour",
+    bpm: 92,
+    swing: 0.16,
+    chords: [[48, 59, 64, 67], [45, 60, 64, 67], [41, 57, 64, 69], [43, 60, 65, 67]], // Cmaj7 Am7 Fmaj7 G7sus
+    kick: [0, 6, 8, 14],
+    snare: [4, 12],
+    hat: [0, 2, 4, 6, 8, 10, 12, 14],
+    keys: [0, 6, 12],
+    bass: [0, 6, 8, 14],
+    arp: [2, 6, 10, 14],
+    pad: true,
+    crackle: 0.15,
+  },
+};
+
+/** Which tracks each scene plays, in turn. */
+const SCENES: Record<MusicScene, string[]> = {
+  lobby: ["coffee", "golden"],
+  writing: ["desk"],
+  show: ["nightbus", "coffee"],
+  talk: ["rain"],
+  finale: ["golden"],
+};
+/** A scene with more than one track moves on after this many bars. */
+const BARS_PER_TURN = 16;
+
 const midi = (n: number) => 440 * Math.pow(2, (n - 69) / 12);
 
 let level = 0.5;
 let musicTimer: ReturnType<typeof setInterval> | null = null;
+let tape: BiquadFilterNode | null = null;
 let nextTime = 0;
 let step = 0;
+let scene: MusicScene = "lobby";
+let turn = 0;
+let track: Track = TRACKS.coffee;
+let wanted: Track | null = null;
+
+function tapeOut(): AudioNode | null {
+  const c = ctx;
+  if (!c || !musicBus) return null;
+  if (!tape) {
+    tape = c.createBiquadFilter();
+    tape.type = "lowpass";
+    tape.frequency.value = 3200;
+    tape.Q.value = 0.4;
+    tape.connect(musicBus);
+  }
+  return tape;
+}
+
+/** A Rhodes-ish note: a sine with a quiet octave on top, quick attack, long fade. */
+function epiano(note: number, at: number, dur: number, vol: number, dest: AudioNode) {
+  tone(midi(note), at, dur, "sine", vol, undefined, dest, 0.008);
+  tone(midi(note + 12), at, dur * 0.4, "sine", vol * 0.25, undefined, dest, 0.004);
+}
 
 function scheduleMusic() {
   const c = ctx;
-  if (!c || !musicBus) return;
-  while (nextTime < c.currentTime + 0.3) {
-    const at = nextTime - c.currentTime;
-    const chord = CHORDS[Math.floor(step / 8) % CHORDS.length];
-    const inBar = step % 8;
-    if (inBar === 0) chord.forEach((n) => tone(midi(n), at, EIGHTH * 8, "triangle", 0.05, undefined, musicBus, 0.4));
-    if (inBar % 2 === 0) {
-      const bass = chord[0] - 12 + (inBar === 6 ? 7 : 0);
-      tone(midi(bass), at, EIGHTH * 1.8, "sine", 0.22, undefined, musicBus, 0.02);
+  const out = tapeOut();
+  if (!c || !out) return;
+  while (nextTime < c.currentTime + 0.35) {
+    const s = step % 16;
+    // Track changes wait for the next bar.
+    if (s === 0) {
+      const bar = Math.floor(step / 16);
+      const list = SCENES[scene];
+      if (!wanted && list.length > 1 && bar > 0 && bar % BARS_PER_TURN === 0) {
+        turn = (turn + 1) % list.length;
+        wanted = TRACKS[list[turn]];
+      }
+      if (wanted) {
+        track = wanted;
+        wanted = null;
+        step = 0;
+      }
     }
-    if (inBar % 2 === 1) noise(at, 0.05, 0.05, 7000, 9000, musicBus, "highpass");
-    if (inBar === 4) noise(at, 0.12, 0.08, 1800, 1200, musicBus, "bandpass");
-    if (Math.floor(step / 32) % 2 === 1 || inBar % 3 === 0) {
-      tone(midi(chord[ARP[inBar]] + 12), at, EIGHTH * 0.9, "sine", 0.05, undefined, musicBus, 0.01);
+    const t = track;
+    const sixteenth = 60 / t.bpm / 4;
+    const swing = s % 2 === 1 ? t.swing * sixteenth : 0;
+    const at = Math.max(0, nextTime - c.currentTime + swing);
+    const chord = t.chords[Math.floor(step / 16) % t.chords.length];
+    const root = 36 + (chord[0] % 12);
+
+    if (s === 0 && t.pad) chord.forEach((n) => tone(midi(n), at, sixteenth * 16, "triangle", 0.03, undefined, out, 0.8));
+    if (t.keys.includes(s)) chord.slice(1).forEach((n) => epiano(n, at, sixteenth * 10, 0.045, out));
+    const bassHit = t.bass.indexOf(s);
+    if (bassHit >= 0) tone(midi(root + (bassHit % 2 === 1 ? 7 : 0)), at, sixteenth * 3.2, "sine", 0.22, undefined, out, 0.015);
+    if (t.arp?.includes(s)) {
+      const n = chord[1 + (Math.floor(step / 2) % (chord.length - 1))] + (s % 8 < 4 ? 12 : 24);
+      tone(midi(n), at, sixteenth * 2.5, "sine", 0.03, undefined, out, 0.01);
     }
-    nextTime += EIGHTH;
+    if (t.kick.includes(s)) tone(120, at, 0.28, "sine", 0.55, 42, out, 0.004);
+    if (t.snare.includes(s)) {
+      noise(at, 0.16, 0.11, 2400, 1300, out, "bandpass");
+      tone(190, at, 0.08, "triangle", 0.06, 140, out, 0.003);
+    }
+    if (t.hat.includes(s)) noise(at, 0.035, s % 4 === 0 ? 0.035 : 0.02, 7500, 9000, out, "highpass");
+    if (Math.random() < t.crackle) noise(at + Math.random() * sixteenth, 0.006, 0.05 + Math.random() * 0.05, 2500, 3500, out, "bandpass");
+
+    nextTime += sixteenth;
     step++;
   }
 }
@@ -275,6 +429,8 @@ function startMusic() {
   if (!c || !musicBus || musicTimer) return;
   nextTime = c.currentTime + 0.1;
   step = 0;
+  track = TRACKS[SCENES[scene][turn % SCENES[scene].length]];
+  wanted = null;
   musicBus.gain.setTargetAtTime(musicLevel(), c.currentTime, 1.5);
   musicTimer = setInterval(scheduleMusic, 100);
 }
@@ -283,6 +439,23 @@ function stopMusic() {
   if (musicTimer) clearInterval(musicTimer);
   musicTimer = null;
   if (ctx && musicBus) musicBus.gain.setTargetAtTime(0, ctx.currentTime, 0.3);
+}
+
+/** Pick the music for what's happening; the new track starts on the next bar. */
+export function setMusicScene(next: MusicScene) {
+  if (next === scene) return;
+  scene = next;
+  turn = 0;
+  wanted = TRACKS[SCENES[next][0]];
+  if (!musicTimer) {
+    track = wanted;
+    wanted = null;
+  }
+}
+
+/** The track playing now (for the 🎵 panel). */
+export function musicTrackName() {
+  return (wanted ?? track).name;
 }
 
 /** Music level by context: full in the lobby, quiet while people talk. */

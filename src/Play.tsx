@@ -171,9 +171,18 @@ export default function Play({ initialCode }: { initialCode: string }) {
       <main className={`phone ${vip ? "has-vip" : ""}`}>
         <PhoneHeader view={view} receivedAt={receivedAt} connected={connected} />
         {!view ? <Waiting title={strings(lang).phone.connecting} /> : <PhoneStage key={phaseKey(view)} view={view} send={send} />}
-        {view?.phase === "lobby" && (
-          <button className="btn ghost small not-you" onClick={forget}>
-            {strings(lang).phone.notYou}
+        {view?.phase === "lobby" && view.you && (
+          // Leaving removes you from the room (the big screen says so); the join form comes back,
+          // so this is also "not you? join as someone else".
+          <button
+            className="btn ghost small not-you"
+            onClick={() => {
+              if (!confirm(strings(lang).phone.leaveConfirm)) return;
+              send({ t: "leave" });
+              setTimeout(forget, 150);
+            }}
+          >
+            {strings(lang).phone.leave}
           </button>
         )}
         {view && vip && <VipBar view={view} send={send} />}

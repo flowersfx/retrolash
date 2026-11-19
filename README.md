@@ -35,9 +35,9 @@ Someone dropping in mid-retro (a PO, a manager) can tap **Join as audience** on 
 - Win streaks ("Hat trick!"), comebacks from last place and lead changes get called out.
 - The Last Lash results reveal from the bottom up with a drumroll.
 - A small QR code in the header lets latecomers join mid-game.
-- **Spoken prompts:** the voice welcomes everyone, announces each round ("Round 3. The Sprint!"), reads the prompts, reacts to results ("Ooh, that was close!"), wraps up, and names the winner on the podium. Answers aren't read aloud. With Azure AI Speech set up (see [infra/README.md](infra/README.md)), the big screen reads round titles and prompts aloud in English or Swedish, and the intros stretch to fit. Toggle it in the lobby; the 🎵 panel has a voice volume. Without Speech the game simply runs silent.
-- Sound effects and a background music loop are generated in the browser. 🔊 mutes everything; 🎵 opens music on/off and separate volume sliders for music and sound effects (remembered in the browser). Browsers only allow sound after the first click or key press on the page.
-- Players can tap emoji reactions on their phone while they wait. The reactions float up on the big screen.
+- **Spoken prompts:** the voice welcomes everyone, announces each round ("Round 3. The Sprint!"), reads the prompts and then the answers as the cards fly in (not in the emoji round), reacts to results ("Ooh, that was close!"), wraps up, and names the winner on the podium. With Azure AI Speech set up (see [infra/README.md](infra/README.md)), the big screen reads round titles and prompts aloud in English or Swedish, and the intros stretch to fit. Toggle it in the lobby; the 🎵 panel has a voice volume. Without Speech the game simply runs silent.
+- Sound effects and lofi background music are generated in the browser. Five tracks follow the game: an easy groove in the lobby, a sparse one while people write, more push during matchups, a quiet pad during discussions and something brighter for the finale (the 🎵 panel shows what's playing). 🔊 mutes everything; 🎵 opens music on/off and separate volume sliders for music and sound effects (remembered in the browser). Browsers only allow sound after the first click or key press on the page.
+- Players can tap emoji reactions on their phone while they wait. The reactions float up from the sender's avatar on the big screen (from the bottom edge in Anonymous mode).
 - A 🆘 *Help me* button on the phone fills in a ready-made silly answer when someone is stuck. If a player runs out of time, the game answers for them the same way, so no matchup is a walkover. An auto-answer is marked on the card after the vote and earns half points.
 
 ### Facilitator controls (big screen)
@@ -48,7 +48,7 @@ Someone dropping in mid-retro (a PO, a manager) can tap **Join as audience** on 
 
 - **Space**, **→** or **Page Down** advances or skips the timer, presenter-clicker style.
 - **P** holds the timer (for a longer discussion) and resumes it.
-- In the lobby you can pick rounds, the number of Sprint rounds, the discussion time (or *Wait for me* to advance by hand), timers and the final-round prompt. You can also add **your own retro prompts**, one per line, which are used first in *The Sprint*, and paste **last retro's action items**.
+- In the lobby you can pick rounds, the number of Sprint rounds, the discussion time (*Wait for me* to advance by hand, or *0 s* to move straight on after a short cooldown for informal retros), timers and the final-round prompt. You can also add **your own retro prompts**, one per line, which are used first in *The Sprint*, and paste **last retro's action items**.
 - Hover over a player in the lobby to remove them. Audience members can be removed at any time.
 - Click 🎛️ on a player or audience member to make them **VIP**. Their phone becomes a remote control (Start, Next, Hold), so the facilitator can step away from the laptop.
 
@@ -56,7 +56,7 @@ Someone dropping in mid-retro (a PO, a manager) can tap **Join as audience** on 
 
 - Players pick their avatar and name-plate colour when joining (and can change it in the lobby).
 - After each matchup, the phone shows your own result: won or lost, the votes, the points.
-- Closing the tab by mistake, or a phone dropping it while the screen is off, is fine: opening the link again picks up the same player. Joining from another browser with the same name takes over that player if it's offline. *Not you? Join as someone else* in the lobby starts over; `/?room=<code>&new` skips the automatic rejoin (for testing several players in one browser).
+- Closing the tab by mistake, or a phone dropping it while the screen is off, is fine: opening the link again picks up the same player. Joining from another browser with the same name takes over that player if it's offline. *Leave the game* on the phone (lobby only) removes you, the big screen shows who left, and you can join again as someone else; `/?room=<code>&new` skips the automatic rejoin (for testing several players in one browser).
 
 ## Development
 

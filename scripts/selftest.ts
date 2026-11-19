@@ -237,4 +237,58 @@ for (const n of [3, 4, 7, 8, 9, 10, 11, 16]) {
   g.dispose();
 }
 
+// A phone that blinks offline mid-answer is still waited for (grace period), then the round goes on.
+{
+  const cs: FakeConn[] = [];
+  const g = new GameRoom({ id: "grce", storage: { get: async () => undefined, put: async () => {} }, getConnections: () => cs }, 0.002);
+  await g.onStart();
+  const join = (id: string) => {
+    const c = new FakeConn(id);
+    cs.push(c);
+    g.onMessage(JSON.stringify(id === "h" ? { t: "helloHost" } : { t: "helloPlayer", name: id }), c);
+    return c;
+  };
+  const h = join("h");
+  const [a, b, c] = ["a", "b", "c"].map(join);
+  g.onMessage(JSON.stringify({ t: "settings", settings: { rounds: ["warmup"] } }), h);
+  g.onMessage(JSON.stringify({ t: "start" }), h);
+  g.advance(); // answering
+  const r = g.state.rounds[0];
+  // c's phone drops (screen off) before answering; a and b answer everything.
+  cs.splice(cs.indexOf(c), 1);
+  g.onClose(c);
+  for (const [conn, id] of [[a, "a"], [b, "b"]] as const)
+    for (const m of r.matchups.filter((x) => x.playerIds.includes(id)))
+      g.onMessage(JSON.stringify({ t: "answer", matchupId: m.id, text: `from ${id}` }), conn);
+  assert.equal(g.state.phase, "answering", "a player who just dropped is still waited for");
+  assert.ok(g.hostView().expectedIds.includes("c"));
+  await new Promise((res) => setTimeout(res, 150)); // grace is 45 s × 0.002 = 90 ms
+  assert.notEqual(g.state.phase, "answering", "after the grace period the round goes on without them");
+  g.dispose();
+}
+
+// Leaving from the phone: lobby only; the player is gone and the big screens are told.
+{
+  const cs: FakeConn[] = [];
+  const g = new GameRoom({ id: "lv", storage: { get: async () => undefined, put: async () => {} }, getConnections: () => cs });
+  await g.onStart();
+  const join = (id: string, hello: object) => {
+    const c = new FakeConn(id);
+    cs.push(c);
+    g.onMessage(JSON.stringify(hello), c);
+    return c;
+  };
+  const h = join("h", { t: "helloHost" });
+  const tv = join("tv", { t: "helloScreen" });
+  const ps = ["A", "B", "C", "D"].map((n) => join(n, { t: "helloPlayer", name: n }));
+  g.onMessage(JSON.stringify({ t: "leave" }), ps[3]);
+  assert.equal(g.player("D"), undefined, "D left");
+  assert.ok(h.sent.some((m) => m.t === "left" && m.name === "D") && tv.sent.some((m) => m.t === "left"), "big screens are told");
+  g.onMessage(JSON.stringify({ t: "settings", settings: { rounds: ["warmup"] } }), h);
+  g.onMessage(JSON.stringify({ t: "start" }), h);
+  g.onMessage(JSON.stringify({ t: "leave" }), ps[0]);
+  assert.ok(g.player("A"), "can't leave mid-game");
+  g.dispose();
+}
+
 console.log("selftest OK");

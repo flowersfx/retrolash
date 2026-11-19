@@ -180,6 +180,21 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 12.9 | Switch *Studio* / *Party* in the lobby | Big screen and phones change look together; readable from the back of the room in both |
 | 12.10 | Open the game on an older Windows 10 PC and an Android phone | Avatars, moods and reactions show the same colour emoji everywhere (no empty boxes or black-and-white symbols) |
 
+## 13. v0.7
+
+| # | Step | Expected |
+|---|------|----------|
+| 13.1 | While answering, watch the avatars in the footer | Not answered yet: dimmed circles. Answered: full colour, lifted, with a ✓. No tall ovals |
+| 13.2 | Three players; one locks their phone (or switches app) before answering, the other two answer | The round keeps waiting for the third. It moves on only when they answer, the timer runs out, or ~45 s after their phone went quiet |
+| 13.3 | Set *Talk time* to *0 s* and play The Sprint | Each result stays about as long as a Warm-up result, then moves on; no "Let's talk" box, music doesn't dip |
+| 13.4 | Tap reactions on a phone | They rise from that player's avatar (the "watching" chip for audience); the avatar bumps |
+| 13.5 | Open the landing page | Two illustrations (big screen, phone), no emoji in the card titles |
+| 13.7 | Speech on, Warm-up or Sprint vote | After the prompt, the voice reads each answer as the cards land (all of them, or none if a clip wasn't ready). Not in Emoji Only |
+| 13.8 | Three tabs as three players; answer in two, wait 20 s, switch to the third | The round still waits for the third |
+| 13.9 | On a phone in the lobby, tap *Leave the game* | Asks first; the player disappears from the lobby and the big screens show "👋 Name left the game"; the phone is back at the join form. Not offered mid-game |
+| 13.10 | Music through a whole game | Coffee Shop / Golden Hour in the lobby (taking turns), Desk Lamp while writing, Night Bus during matchups, a quiet pad while talking, Golden Hour for highlights/podium/summary. Changes land on a beat; nothing stutters |
+| 13.6 | Lobby settings | Labelled rows (Rounds, Sprint format, Language + Look, Options); *More settings* opens an even three-column grid |
+
 ## Known gaps to check while testing
 
 - A phone that rejoins from a *different browser* with the same name can only take over once the old connection is gone (up to ~20 s after the phone slept). Until then it gets "Name 2"; remove the stale one in the lobby.

@@ -97,6 +97,7 @@ let lashTitle = "";
 const spokenPhases = new Set();
 let clipUrl = null;
 let maxSides = 0;
+let answersRead = 0;
 ws.onmessage = (e) => {
   const msg = JSON.parse(e.data);
   if (msg.t === "hostToken") hostToken = msg.token;
@@ -125,6 +126,8 @@ ws.onmessage = (e) => {
     clipUrl ??= v.say[0].url;
   }
   if (v.matchup) maxSides = Math.max(maxSides, v.matchup.answers.length);
+  // Answers read aloud while voting: one clip per answer (plus maybe the "time to vote" nudge).
+  if (v.phase === "voting" && v.roundKind !== "emoji" && (v.say?.length ?? 0) >= v.matchup.answers.length) answersRead++;
   if (v.phase === "lashResult") lashTitle = v.roundTitle;
   if (v.phase === "summary") void check(v);
 };
@@ -170,7 +173,8 @@ async function check(v) {
     const r = await fetch(base + bad);
     if (r.status !== 404) fail(`${bad} should be 404, got ${r.status}`);
   }
-  console.log(`speech: clips on ${[...spokenPhases].join(", ")}`);
+  console.log(`speech: clips on ${[...spokenPhases].join(", ")}; answers read aloud in ${answersRead} votes`);
+  if (answersRead === 0) fail("answers were never read aloud");
 
   // Only the first big screen (or one with its token) may host.
   const hostHello = (token) =>

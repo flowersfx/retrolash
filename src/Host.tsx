@@ -19,6 +19,9 @@ import {
   onSoundChange,
   setMusicEnabled,
   setMusicMood,
+  setMusicScene,
+  musicTrackName,
+  type MusicScene,
   setSoundEnabled,
   sfx,
   soundEnabled,
@@ -31,6 +34,7 @@ import {
   FOLLOWUP_OPTIONS,
   LANGS,
   MIN_PLAYERS,
+  NO_TALK,
   HIGHLIGHT_STEP_MS,
   MOODS,
   PACKS,
@@ -64,7 +68,23 @@ interface FloatingReaction {
   id: number;
   emoji: string;
   avatar?: string;
+  /** Percent across the bottom edge, or, with `y`, pixels: the sender's avatar on screen. */
   x: number;
+  y?: number;
+}
+
+/** Where a reaction starts: above the sender's avatar (tile or strip), or the audience chip. */
+function reactionOrigin(from: string | undefined, players: PublicPlayer[] | undefined) {
+  if (!from) return null;
+  const el =
+    document.querySelector<HTMLElement>(`[data-pid="${CSS.escape(from)}"]`) ??
+    (players?.find((p) => p.id === from)?.audience ? document.querySelector<HTMLElement>('[data-pid="audience"]') : null);
+  const r = el?.getBoundingClientRect();
+  if (!el || !r || r.width === 0) return null;
+  // A little bump on the avatar, so you can see who it was.
+  if (!REDUCED_MOTION)
+    el.animate?.([{ scale: "1" }, { scale: "1.3" }, { scale: "1" }], { duration: 320, easing: "cubic-bezier(.3,1.6,.5,1)" });
+  return { x: r.left + r.width / 2, y: r.top };
 }
 
 /** Ways a card can leave the screen. One is picked per matchup. */
@@ -134,6 +154,8 @@ export default function Host({ code, screen = false }: { code: string; screen?: 
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
   const nextId = useRef(0);
   const lastPop = useRef(0);
+  const playersRef = useRef<PublicPlayer[] | undefined>(undefined);
+  const [leavers, setLeavers] = useState<{ id: number; name: string }[]>([]);
   const onEvent = useCallback((e: RoomEvent) => {
     if (e.t === "hostToken") {
       try {
@@ -143,9 +165,17 @@ export default function Host({ code, screen = false }: { code: string; screen?: 
       }
       return;
     }
+    if (e.t === "left") {
+      const id = nextId.current++;
+      setLeavers((l) => [...l, { id, name: e.name }]);
+      setTimeout(() => setLeavers((l) => l.filter((x) => x.id !== id)), 4500);
+      return;
+    }
     if (e.t !== "reaction") return;
     const id = nextId.current++;
-    setReactions((r) => [...r.slice(-40), { id, emoji: e.emoji, avatar: e.avatar, x: 5 + Math.random() * 90 }]);
+    const origin = reactionOrigin(e.from, playersRef.current);
+    const float = origin ?? { x: 5 + Math.random() * 90 };
+    setReactions((r) => [...r.slice(-40), { id, emoji: e.emoji, avatar: e.avatar, ...float }]);
     setTimeout(() => setReactions((r) => r.filter((x) => x.id !== id)), 3200);
     if (Date.now() - lastPop.current > 150) {
       lastPop.current = Date.now();
@@ -154,6 +184,7 @@ export default function Host({ code, screen = false }: { code: string; screen?: 
   }, [tokenKey]);
   const room = useRoom<HostView>(code, hello, onEvent);
   const { view, receivedAt, connected, error } = room;
+  playersRef.current = view?.players;
   // An extra screen never sends anything but its hello.
   const send: Send = useMemo(() => (screen ? () => {} : room.send), [screen, room.send]);
   const seconds = useCountdown(view?.remainingMs, receivedAt);
@@ -261,13 +292,34 @@ export default function Host({ code, screen = false }: { code: string; screen?: 
           </footer>
         )}
 
+        {leavers.length > 0 && (
+          <div className="toasts" role="status">
+            {leavers.map((l) => (
+              <div key={l.id} className="toast">
+                {strings(lang).host.left(l.name)}
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="reaction-layer" aria-hidden>
-          {reactions.map((r) => (
-            <span key={r.id} className="float-reaction" style={{ left: `${r.x}%` }}>
-              {r.emoji}
-              {r.avatar && <small>{r.avatar}</small>}
-            </span>
-          ))}
+          {reactions.map((r) =>
+            r.y !== undefined ? (
+              // From the sender's avatar, which already shows who it was.
+              <span
+                key={r.id}
+                className="float-reaction from"
+                style={{ left: r.x, top: r.y, "--rise": `${r.y + 60}px`, "--drift": `${(r.id % 5) * 18 - 36}px` } as CSSProperties}
+              >
+                {r.emoji}
+              </span>
+            ) : (
+              <span key={r.id} className="float-reaction" style={{ left: `${r.x}%` }}>
+                {r.emoji}
+                {r.avatar && <small>{r.avatar}</small>}
+              </span>
+            ),
+          )}
         </div>
       </main>
     </LangContext.Provider>
@@ -408,11 +460,24 @@ function usePhaseSounds(view: HostView | null, seconds: number | null) {
 function useMusicMood(view: HostView | null) {
   const talk =
     !!view &&
-    ((view.phase === "matchupResult" && view.roundKind === "retro") ||
+    ((view.phase === "matchupResult" && view.roundKind === "retro" && view.settings.discussionSeconds !== NO_TALK) ||
       view.phase === "lashResult" ||
       (view.phase === "pollResult" && view.roundKind === "followup"));
   const mood = !view ? "full" : talk ? "talk" : ["lobby", "summary"].includes(view.phase) ? "full" : "low";
   useEffect(() => setMusicMood(mood), [mood]);
+  // Which track: calm while people write, more push for the show, a pad while people talk.
+  const scene: MusicScene = !view
+    ? "lobby"
+    : talk
+      ? "talk"
+      : view.phase === "lobby"
+        ? "lobby"
+        : view.phase === "answering"
+          ? "writing"
+          : ["highlights", "podium", "summary"].includes(view.phase)
+            ? "finale"
+            : "show";
+  useEffect(() => setMusicScene(scene), [scene]);
 }
 
 function Stage({ view, send, msLeft, screen }: { view: HostView; send: Send; msLeft: number | null; screen: boolean }) {
@@ -436,6 +501,7 @@ function Stage({ view, send, msLeft, screen }: { view: HostView; send: Send; msL
           count={view.matchupCount!}
           msLeft={msLeft}
           spoken={!!view.say?.length}
+          discussion={view.settings.discussionSeconds}
         />
       ) : null;
     case "pollResult":
@@ -567,6 +633,7 @@ function Lobby({ view, send, screen }: { view: HostView; send: Send; screen: boo
           {players.map((p) => (
             <div
               key={p.id}
+              data-pid={p.id}
               className={`player-tile ${p.connected ? "" : "dim"}`}
               style={{ "--plate": p.color } as CSSProperties}
             >
@@ -654,7 +721,7 @@ function AudienceRow({ audience, send }: { audience: PublicPlayer[]; send?: Send
     <div className="audience-row">
       <span className="muted">{t.lobby.audience}</span>
       {audience.map((p) => (
-        <span key={p.id} className={`audience-chip ${p.connected ? "" : "dim"}`}>
+        <span key={p.id} data-pid={p.id} className={`audience-chip ${p.connected ? "" : "dim"}`}>
           {p.avatar} {p.name}
           {send && <VipButton p={p} send={send} />}
           {send && (
@@ -712,56 +779,70 @@ function SettingsPanel({
 
   return (
     <div className="settings">
-      <div className="settings-summary">
-        <label className="toggle">
-          <input type="checkbox" checked={settings.anonymous} onChange={(e) => update({ anonymous: e.target.checked })} />
-          <span>
-            <b>{t.settings.anonymous}</b>: {t.settings.anonymousHint}
-          </span>
-        </label>
-        {speechAvailable && (
-          <label className="toggle">
-            <input type="checkbox" checked={settings.speech} onChange={(e) => update({ speech: e.target.checked })} />
-            <span>{t.settings.speech}</span>
-          </label>
-        )}
-        <div className="seg" role="group" aria-label={t.settings.language}>
-          {LANGS.map((l) => (
-            <button key={l} className={settings.lang === l ? "on" : ""} onClick={() => update({ lang: l })}>
-              {l === "en" ? "🇬🇧 English" : "🇸🇪 Svenska"}
-            </button>
+      {/* One label column, one control column: every row lines up. */}
+      <div className="settings-rows">
+        <span className="set-label">{t.settings.roundsLabel}</span>
+        <div className="rounds-row">
+          {TOGGLEABLE_ROUNDS.map((k) => (
+            <label key={k} className={`round-chip ${settings.rounds.includes(k) ? "on" : ""}`}>
+              <input type="checkbox" checked={settings.rounds.includes(k)} onChange={() => toggleRound(k)} />
+              {t.rounds[k]}
+            </label>
           ))}
         </div>
-        <div className="seg" role="group" aria-label={t.settings.theme}>
-          {THEMES.map((th) => (
-            <button key={th} className={settings.theme === th ? "on" : ""} onClick={() => update({ theme: th })}>
-              {t.settings.themes[th]}
-            </button>
-          ))}
-        </div>
-        <button className="btn ghost small" onClick={() => setOpen(!open)}>
-          {open ? t.settings.hide : t.settings.more}
-        </button>
-      </div>
-      <div className="rounds-row">
-        {TOGGLEABLE_ROUNDS.map((k) => (
-          <label key={k} className={`round-chip ${settings.rounds.includes(k) ? "on" : ""}`}>
-            <input type="checkbox" checked={settings.rounds.includes(k)} onChange={() => toggleRound(k)} />
-            {t.rounds[k]}
-          </label>
-        ))}
+
         {settings.rounds.includes("retro") && (
-          <label className="pack-select">
-            {t.settings.format}
-            <select value={settings.pack} onChange={(e) => update({ pack: e.target.value as Settings["pack"] })}>
-              {PACKS.map((p) => (
-                <option key={p} value={p}>
-                  {t.packs[p]}
-                </option>
-              ))}
-            </select>
-          </label>
+          <>
+            <span className="set-label">{t.settings.format}</span>
+            <div>
+              <select className="pill-select" value={settings.pack} onChange={(e) => update({ pack: e.target.value as Settings["pack"] })}>
+                {PACKS.map((p) => (
+                  <option key={p} value={p}>
+                    {t.packs[p]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
         )}
+
+        <span className="set-label">{t.settings.language}</span>
+        <div className="set-inline">
+          <div className="seg" role="group" aria-label={t.settings.language}>
+            {LANGS.map((l) => (
+              <button key={l} className={settings.lang === l ? "on" : ""} onClick={() => update({ lang: l })}>
+                {l === "en" ? "English" : "Svenska"}
+              </button>
+            ))}
+          </div>
+          <span className="set-label inline">{t.settings.theme}</span>
+          <div className="seg" role="group" aria-label={t.settings.theme}>
+            {THEMES.map((th) => (
+              <button key={th} className={settings.theme === th ? "on" : ""} onClick={() => update({ theme: th })}>
+                {t.settings.themes[th]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <span className="set-label">{t.settings.options}</span>
+        <div className="set-inline">
+          <label className="toggle" title={t.settings.anonymousHint}>
+            <input type="checkbox" checked={settings.anonymous} onChange={(e) => update({ anonymous: e.target.checked })} />
+            <span>
+              {t.settings.anonymous} <small className="muted">({t.settings.anonymousHint})</small>
+            </span>
+          </label>
+          {speechAvailable && (
+            <label className="toggle">
+              <input type="checkbox" checked={settings.speech} onChange={(e) => update({ speech: e.target.checked })} />
+              <span>{t.settings.speech}</span>
+            </label>
+          )}
+          <button className="btn ghost small set-more" onClick={() => setOpen(!open)}>
+            {open ? t.settings.hide : t.settings.more}
+          </button>
+        </div>
       </div>
       {open && (
         <div className="settings-grid">
@@ -778,6 +859,7 @@ function SettingsPanel({
             {t.settings.talkTime}
             <select value={settings.discussionSeconds} onChange={(e) => update({ discussionSeconds: +e.target.value })}>
               <option value={0}>{t.settings.waitForMe}</option>
+              <option value={NO_TALK}>{t.settings.noTalk}</option>
               {[30, 60, 90, 120, 180].map((s) => (
                 <option key={s} value={s}>
                   {s < 60 ? `${s} s` : `${s / 60} min`}
@@ -918,6 +1000,7 @@ function VolumePanel({ music, on }: { music: boolean; on: boolean }) {
             <input type="checkbox" checked={music} onChange={(e) => setMusicEnabled(e.target.checked)} />
             <span>{music ? t.host.musicOn : t.host.musicOff}</span>
           </label>
+          {music && on && <p className="muted small-print now-playing">♪ {musicTrackName()}</p>}
           {slider("music", t.host.music, !music)}
           {slider("sfx", t.host.effects)}
           {slider("voice", t.host.voice)}
@@ -1005,6 +1088,7 @@ function DoneGrid({ view }: { view: HostView }) {
       {players.map((p, i) => (
         <div
           key={p.id}
+          data-pid={p.id}
           className={`done-tile ${done.has(p.id) ? "done" : ""}`}
           style={{ animationDelay: `${i * 70}ms`, "--plate": p.color } as CSSProperties}
         >
@@ -1029,8 +1113,10 @@ function PlayerStrip({ view }: { view: HostView }) {
         .map((p) => (
           <span
             key={p.id}
+            data-pid={p.id}
+            // Not "waiting": that class is the phone's full-height waiting screen.
             className={`strip-av ${!p.connected ? "dim" : ""} ${
-              expected.has(p.id) ? (done.has(p.id) ? "done" : "waiting") : ""
+              expected.has(p.id) ? (done.has(p.id) ? "done" : "pending") : ""
             }`}
             style={{ "--plate": p.color } as CSSProperties}
             title={p.name}
@@ -1039,7 +1125,7 @@ function PlayerStrip({ view }: { view: HostView }) {
           </span>
         ))}
       {audience.length > 0 && (
-        <span className="strip-audience" title={audience.map((p) => p.name).join(", ")}>
+        <span className="strip-audience" data-pid="audience" title={audience.map((p) => p.name).join(", ")}>
           {t.host.watching(audience.length)}
         </span>
       )}
@@ -1134,6 +1220,7 @@ function Matchup({
   count,
   msLeft,
   spoken,
+  discussion,
 }: {
   m: MatchupView;
   kind?: RoundKind;
@@ -1142,6 +1229,7 @@ function Matchup({
   count: number;
   msLeft: number | null;
   spoken: boolean;
+  discussion: number;
 }) {
   const t = useT();
   const P = usePrompts();
@@ -1304,7 +1392,7 @@ function Matchup({
           {m.callout.kind === "streak" ? t.stage.streak(m.callout.name, m.callout.n) : t.stage.comeback(m.callout.name)}
         </div>
       )}
-      {extras && kind === "retro" && (
+      {extras && kind === "retro" && discussion !== NO_TALK && (
         <div className="discuss slide-up">
           <span className="discuss-label">{t.stage.letsTalk}</span>
           {pick(P.discussion, m.id)}
