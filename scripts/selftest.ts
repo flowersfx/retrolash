@@ -337,10 +337,12 @@ for (const n of [3, 4, 7, 8, 9, 10, 11, 16]) {
   await b.stop();
   const m = JSON.parse(readFileSync(file, "utf8"))["2026-11"];
   assert.deepEqual([m.speechChars, m.speechClips, m.starts, m.runtimeSec], [1500, 2, 2, 7200], "both revisions counted");
-  const sum = summarizeMeter({ "2026-11": m }, { speechChars: 500_000, runtimeHours: 200 }, new Date(t));
+  const sum = summarizeMeter({ "2026-11": m }, { speechChars: 500_000, runtimeHours: 200, speechStopShare: 0.85 }, new Date(t));
   assert.equal(sum.speech.share, 0.003);
   assert.equal(sum.runtime.hours, 2);
   assert.equal(sum.runtime.share, 0.01);
+  assert.equal(sum.speech.paused, false);
+  assert.equal(summarizeMeter({ "2026-11": { ...m, speechChars: 425_000 } }, undefined, new Date(t)).speech.paused, true, "85% of the free tier: paused");
   assert.equal(summarizeMeter({ "2026-10": m }, undefined, new Date(t)).speech.chars, 0, "a new month starts at zero");
 }
 
@@ -351,6 +353,59 @@ for (const n of [3, 4, 7, 8, 9, 10, 11, 16]) {
   const inner = ssml.slice(ssml.indexOf("<voice") , ssml.indexOf("</voice>")).replace(/^<voice[^>]*>/, "");
   assert.equal(billable, inner.length);
   assert.ok(inner.includes("&amp;") && inner.startsWith("<mstts:express-as"), "escaped text and markup both count");
+}
+
+// Speech abuse: a resubmitted answer costs one clip, games have a budget, and a monthly guard stops room clips.
+{
+  const made: number[] = [];
+  let roomOk = true;
+  const sp = new AzureSpeech({
+    dir: mkdtempSync(path.join(tmpdir(), "retrolash-tts3-")),
+    voices: { en: "en-US-JennyNeural", sv: "sv-SE-SofieNeural" },
+    styles: { en: "cheerful" },
+    fake: true,
+    slotDelayMs: 40,
+    roomAllowed: () => roomOk,
+    onSynthesized: (chars) => made.push(chars),
+    log: () => {},
+  });
+  await sp.init();
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const room = (text: string) => ({ text, lang: "en" as const, scope: "room" as const });
+  const budget = { key: "abcd:g1", chars: 100_000 };
+
+  // 200 edits of one answer in a loop: only the last is made.
+  for (let i = 0; i < 200; i++) sp.prefetch([room(`spam answer number ${i}`)], { slot: "abcd:m1:p1", budget });
+  await wait(150);
+  assert.equal(made.length, 1, "200 edits of one answer make one clip");
+  assert.ok(sp.get(room("spam answer number 199")), "the last version is the one made");
+  assert.equal(sp.get(room("spam answer number 3")), null, "earlier versions never are");
+  assert.equal(sp.used("abcd:g1"), made[0], "the game's budget is charged what Azure bills");
+
+  // Answering is over: a clip still waiting out its delay is made at once.
+  made.length = 0;
+  sp.prefetch([room("a late answer")], { slot: "abcd:m2:p1", budget });
+  sp.prefetch([room("a late answer")], { budget });
+  await wait(15);
+  assert.equal(made.length, 1, "needed now: no waiting for edits");
+
+  // Budget: room clips stop once a game has spent it; stock lines go on.
+  made.length = 0;
+  const small = { key: "abcd:g2", chars: 250 };
+  for (let i = 0; i < 5; i++) sp.prefetch([room(`budget line ${i}`)], { budget: small });
+  sp.prefetch([{ text: "Stock line", lang: "en", scope: "lib" }], { budget: small });
+  await wait(50);
+  assert.ok(sp.used("abcd:g2") <= 250, `budget kept: ${sp.used("abcd:g2")}`);
+  assert.equal(made.length, 3, "two room clips fit the budget, plus the stock line");
+
+  // Monthly guard: no new room clips at all; stock lines still made.
+  made.length = 0;
+  roomOk = false;
+  sp.prefetch([room("over the monthly guard")], { budget });
+  sp.prefetch([{ text: "Another stock line", lang: "en", scope: "lib" }]);
+  await wait(50);
+  assert.equal(made.length, 1, "only the stock line is made past the guard");
+  assert.equal(sp.get(room("over the monthly guard")), null);
 }
 
 // One prompt each for big teams: everyone in exactly one group, about half as many matchups.

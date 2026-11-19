@@ -208,6 +208,8 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 14.4 | Deploy while a game from the previous version is running | Phones of that game reconnect as themselves |
 | 14.5 | After deploying, start a game and check the container logs | A "new room ABCD from a.b.x.x" line with your public address (checked live on 2026-11-19) and no "refused" lines in normal use |
 | 14.6 | Landing page after a game with speech on | A second line: "This month: N h server time (x% of the free 200 h) · N speech characters (y% of the free 500,000)" |
+| 14.7 | (v0.8.4) Edit an answer a few times quickly, then let everyone finish | The final version is read aloud during voting, as before. Answers submitted in the last seconds are still read |
+| 14.8 | (v0.8.4) After a real game, look at the usage line (`npx tsx scripts/usage.ts usage.jsonl`) | `speechChars` is well under 6000 + 3000 × players. If it's close, raise the budget |
 
 ## Known gaps to check while testing
 

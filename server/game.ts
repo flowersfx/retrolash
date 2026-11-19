@@ -90,13 +90,26 @@ export type TimedLine = SpeechLine & { at?: number; optional?: boolean };
 export type UsageEvent = Record<string, string | number | boolean>;
 
 /** Text to speech (server/tts.ts). Optional: without it the game is silent. */
+export interface SpeechOptions {
+  /** One clip per slot (a player's answer to a matchup, their kudos): a newer line replaces an older one not made yet. */
+  slot?: string;
+  /** Room clips count against this game's character budget; past it they are not made. */
+  budget?: { key: string; chars: number };
+}
+
 export interface Speech {
   readonly enabled: boolean;
   /** Start generating these in the background. */
-  prefetch(lines: SpeechLine[]): void;
+  prefetch(lines: SpeechLine[], opts?: SpeechOptions): void;
   /** The clip if it is ready now, else null (and it gets queued). Never blocks. */
-  get(line: SpeechLine): SpeechClip | null;
+  get(line: SpeechLine, opts?: SpeechOptions): SpeechClip | null;
+  /** Billable room characters spent under a budget key. */
+  used?(key: string): number;
 }
+
+/** Room speech per game: a base plus a share per player, about 3× what a real game uses (see CLAUDE.md). */
+export const SPEECH_BUDGET_BASE = 6000;
+export const SPEECH_BUDGET_PER_PLAYER = 3000;
 
 export interface Room {
   /** Lowercase room code. */
@@ -674,7 +687,7 @@ export class GameRoom {
         if (!text) return;
         m.answers[idx] = text;
         // Start making the clip now, so it's ready when this matchup is voted on.
-        if (round.kind !== "emoji") this.prefetchSpeech([text]);
+        if (round.kind !== "emoji") this.prefetchSpeech([text], `${this.room.id}:${m.id}:${playerId}`);
         break;
       }
       case "lashAnswers": {
@@ -718,7 +731,7 @@ export class GameRoom {
         const text = clean(msg.text, MAX_KUDOS_LENGTH);
         if (!to || !text) return;
         (round.kudos ??= {})[playerId] = { to, text };
-        this.prefetchSpeech([this.kudosLine({ to, text })]);
+        this.prefetchSpeech([this.kudosLine({ to, text })], `${this.room.id}:${s.gameId}:kudos:${playerId}`);
         break;
       }
       case "vote": {
@@ -817,7 +830,7 @@ export class GameRoom {
         votes: {},
       }));
       // Audio for every prompt is made while people write (~90 s), well before each intro.
-      this.speech?.prefetch(round.matchups.map((m) => this.line(m.prompt)));
+      this.speech?.prefetch(round.matchups.map((m) => this.line(m.prompt)), this.speechOpts());
     }
     const ms =
       round.kind === "checkin"
@@ -850,7 +863,7 @@ export class GameRoom {
       // Read every note as its card lands, if all the clips are ready (all or none:
       // nobody's thanks gets skipped). Otherwise the cards land on the usual beat.
       const notes = order.map((id) => ({ ...this.line(this.kudosLine(round.kudos![id])), optional: false }));
-      const clips = this.speech?.enabled && this.state.settings.speech ? notes.map((l) => this.speech!.get(l)) : [];
+      const clips = this.speech?.enabled && this.state.settings.speech ? notes.map((l) => this.speech!.get(l, this.speechOpts())) : [];
       const voiced = clips.length > 0 && clips.every((c) => c);
       // The last note was probably sent a moment ago: give its clip a few seconds once.
       if (clips.length > 0 && !voiced && !round.kudosWaited) {
@@ -976,7 +989,7 @@ export class GameRoom {
     const lines: TimedLine[] = m.answers
       .filter((a): a is string => !!a)
       .map((a, i) => ({ ...this.line(a), ...(i === 0 ? { at: 1300 } : {}) }));
-    return lines.every((l) => this.speech!.get(l)) ? lines : [];
+    return lines.every((l) => this.speech!.get(l, this.speechOpts())) ? lines : [];
   }
 
   /** A kudos note as the voice says it: "For Ada: thanks for the reviews". */
@@ -986,9 +999,21 @@ export class GameRoom {
   }
 
   /** Queue player text for speech (when the room has speech on). */
-  prefetchSpeech(texts: string[]) {
+  prefetchSpeech(texts: string[], slot?: string) {
     if (!this.speech?.enabled || !this.state.settings.speech) return;
-    this.speech.prefetch(texts.map((t) => this.line(t)));
+    this.speech.prefetch(texts.map((t) => this.line(t)), { ...this.speechOpts(), slot });
+  }
+
+  /** This game's speech budget: room clips stop once it's spent (the game just goes quiet). */
+  speechOpts(): SpeechOptions {
+    const s = this.state;
+    const players = s.players.filter((p) => !p.audience).length;
+    return {
+      budget: {
+        key: `${this.room.id}:${s.gameId ?? "lobby"}`,
+        chars: SPEECH_BUDGET_BASE + SPEECH_BUDGET_PER_PLAYER * players,
+      },
+    };
   }
 
   /** A word from the host as the result lands on screen. */
@@ -1101,7 +1126,7 @@ export class GameRoom {
   /** Keep the current leader's name ready, so the podium can say it. */
   prefetchWinner() {
     if (!this.speech?.enabled || !this.state.settings.speech || this.state.settings.anonymous) return;
-    this.speech.prefetch(this.winnerLines());
+    this.speech.prefetch(this.winnerLines(), this.speechOpts());
   }
 
   /** In the lobby, prepare the lines the planned game will say. */
@@ -1114,7 +1139,7 @@ export class GameRoom {
       ...plan.map((r, i) => this.line(t.spoken.round(i + 1, spokenTitle(r.title)), "lib")),
       this.line(s.settings.lashPrompt),
       this.line(t.spoken.highlights, "lib"),
-    ]);
+    ], this.speechOpts());
   }
 
   /** The game's best answers: clean sweeps first, then the most votes. Auto-answers don't count. */
@@ -1164,6 +1189,8 @@ export class GameRoom {
       audience: s.players.length - players,
       // Test bots (scripts/bots.mjs) have device ids starting with "bot-": summaries leave those games out.
       bots: s.players.filter((p) => botIds.has(p.id)).length,
+      // Billable characters of this game's own clips (player and facilitator text), to tune the budget.
+      speechChars: this.speech?.used?.(this.speechOpts().budget!.key) ?? 0,
       rounds: s.plan.length,
       lang: s.settings.lang,
       pack: s.settings.pack,
@@ -1302,7 +1329,7 @@ export class GameRoom {
 
   clips(lines: TimedLine[]): SpeechClip[] | null {
     if (!this.speech?.enabled || !this.state.settings.speech) return null;
-    const found = lines.filter((l) => l.text.trim()).map((l) => ({ l, c: this.speech!.get(l) }));
+    const found = lines.filter((l) => l.text.trim()).map((l) => ({ l, c: this.speech!.get(l, this.speechOpts()) }));
     if (found.some((x) => !x.c && !x.l.optional)) return null;
     const clips = found.flatMap(({ l, c }) => (!c ? [] : l.at !== undefined ? [{ ...c, at: l.at }] : [c]));
     return clips.length ? clips : null;

@@ -10,7 +10,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { Speech, SpeechClip, SpeechLine } from "./game";
+import type { Speech, SpeechClip, SpeechLine, SpeechOptions } from "./game";
 import type { Lang } from "../shared/types";
 
 /** 48 kbit/s constant bitrate, so a clip's length follows from its size. */
@@ -18,9 +18,12 @@ const FORMAT = "audio-24khz-48kbitrate-mono-mp3";
 const BYTES_PER_MS = 48_000 / 8 / 1000;
 const CONCURRENCY = 2;
 const RETRY_FAILED_MS = 10 * 60_000;
+/** A slotted line (a player's answer or kudos) waits this long for edits before it is made. */
+const SLOT_DELAY_MS = 3000;
 export const CLIP_PATH = /^\/tts\/(lib|room)\/([a-f0-9]{32})\.mp3$/;
 
 type Entry = { state: "ready"; ms: number } | { state: "pending" } | { state: "failed"; at: number };
+type Job = { id: string; line: SpeechLine; slot?: string; budget?: SpeechOptions["budget"] };
 
 export interface SpeechConfig {
   dir: string;
@@ -31,6 +34,9 @@ export interface SpeechConfig {
   styles?: Partial<Record<Lang, string>>;
   /** Called with the billable characters of each clip made (for the free-tier meter). */
   onSynthesized?: (chars: number) => void;
+  /** False stops new room clips (player and facilitator text) server-wide, e.g. near the monthly free tier. */
+  roomAllowed?: () => boolean;
+  slotDelayMs?: number;
   /** Test hook: write fake clips instead of calling Azure. */
   fake?: boolean;
   log: (...args: unknown[]) => void;
@@ -39,8 +45,17 @@ export interface SpeechConfig {
 export class AzureSpeech implements Speech {
   readonly enabled: boolean;
   private index = new Map<string, Entry>();
-  private queue: { id: string; line: SpeechLine }[] = [];
+  private queue: Job[] = [];
   private running = 0;
+  /** Slotted jobs still waiting out their delay, by clip id. */
+  private delayed = new Map<string, { job: Job; timer: ReturnType<typeof setTimeout> }>();
+  /** The clip id each slot currently wants. */
+  private slots = new Map<string, string>();
+  /** Billable room characters spent per budget key (a game). */
+  private spent = new Map<string, { chars: number; at: number }>();
+  /** Budget keys already logged as over, and whether the monthly guard was logged. */
+  private overLogged = new Set<string>();
+  private guardLogged = false;
 
   constructor(private readonly cfg: SpeechConfig) {
     this.enabled = !!cfg.fake || !!(cfg.key && cfg.region);
@@ -71,29 +86,98 @@ export class AzureSpeech implements Speech {
     return `${line.scope}/${hash}`;
   }
 
-  get(line: SpeechLine): SpeechClip | null {
+  get(line: SpeechLine, opts: SpeechOptions = {}): SpeechClip | null {
     if (!this.enabled) return null;
     const id = this.id(line);
     const e = this.index.get(id);
     if (e?.state !== "ready") {
-      this.prefetch([line]);
+      // Needed now: no slot delay.
+      this.prefetch([line], { budget: opts.budget });
       return null;
     }
     return { id, url: `/tts/${id}.mp3`, ms: Math.round(e.ms) };
   }
 
-  prefetch(lines: SpeechLine[]) {
+  /**
+   * Start making these in the background. With a slot, a newer line for the same
+   * slot replaces one that hasn't started yet, and waits a moment for further
+   * edits: resubmitting an answer over and over costs one clip, not one per edit.
+   */
+  prefetch(lines: SpeechLine[], opts: SpeechOptions = {}) {
     if (!this.enabled) return;
     for (const line of lines) {
       if (!line.text.trim()) continue;
       const id = this.id(line);
+      if (opts.slot) this.replaceSlot(opts.slot, id);
       const e = this.index.get(id);
-      if (e?.state === "ready" || e?.state === "pending") continue;
+      if (e?.state === "ready") continue;
+      if (e?.state === "pending") {
+        // Someone needs a delayed clip without delay (answering is over): make it now.
+        if (!opts.slot) this.release(id);
+        continue;
+      }
       if (e?.state === "failed" && Date.now() - e.at < RETRY_FAILED_MS) continue;
       this.index.set(id, { state: "pending" });
-      this.queue.push({ id, line });
+      const job: Job = { id, line, slot: opts.slot, budget: opts.budget };
+      if (opts.slot) {
+        this.slots.set(opts.slot, id);
+        const timer = setTimeout(() => this.release(id), this.cfg.slotDelayMs ?? SLOT_DELAY_MS);
+        timer.unref?.();
+        this.delayed.set(id, { job, timer });
+      } else {
+        this.queue.push(job);
+      }
     }
     this.pump();
+  }
+
+  /** Billable room characters spent so far under this budget key. */
+  used(key: string) {
+    return this.spent.get(key)?.chars ?? 0;
+  }
+
+  /** Move a delayed job into the queue now. */
+  private release(id: string) {
+    const d = this.delayed.get(id);
+    if (!d) return;
+    clearTimeout(d.timer);
+    this.delayed.delete(id);
+    this.queue.push(d.job);
+    this.pump();
+  }
+
+  /** The slot now wants this id: drop its previous clip if that hasn't started. */
+  private replaceSlot(slot: string, id: string) {
+    const prev = this.slots.get(slot);
+    if (!prev || prev === id) return;
+    this.slots.delete(slot);
+    const d = this.delayed.get(prev);
+    if (d) {
+      clearTimeout(d.timer);
+      this.delayed.delete(prev);
+    } else {
+      const i = this.queue.findIndex((j) => j.id === prev);
+      if (i < 0) return; // already being made
+      this.queue.splice(i, 1);
+    }
+    if (this.index.get(prev)?.state === "pending") this.index.delete(prev);
+  }
+
+  /** May this room clip be made? Checks the monthly guard and the game's budget. */
+  private affordable(job: Job, billable: number) {
+    if (job.line.scope !== "room") return true;
+    if (this.cfg.roomAllowed && !this.cfg.roomAllowed()) {
+      if (!this.guardLogged) this.cfg.log("speech: room clips paused (monthly free-tier guard)");
+      this.guardLogged = true;
+      return false;
+    }
+    this.guardLogged = false;
+    const b = job.budget;
+    if (!b) return true;
+    if (this.used(b.key) + billable <= b.chars) return true;
+    if (!this.overLogged.has(b.key)) this.cfg.log(`speech: game ${b.key} is over its budget of ${b.chars} characters`);
+    this.overLogged.add(b.key);
+    return false;
   }
 
   /** Path on disk for a clip URL, or null if it isn't one of ours. */
@@ -108,6 +192,9 @@ export class AzureSpeech implements Speech {
   /** Delete room clips older than the saved-game TTL. Library clips stay. */
   async sweep(maxAgeMs: number) {
     if (!this.enabled) return;
+    const old = Date.now() - maxAgeMs;
+    for (const [key, v] of this.spent) if (v.at < old) this.spent.delete(key);
+    this.overLogged.clear();
     const dir = path.join(this.cfg.dir, "room");
     const cutoff = Date.now() - maxAgeMs;
     for (const name of await readdir(dir).catch(() => [] as string[])) {
@@ -123,17 +210,27 @@ export class AzureSpeech implements Speech {
   private pump() {
     while (this.running < CONCURRENCY && this.queue.length) {
       const job = this.queue.shift()!;
+      if (job.slot && this.slots.get(job.slot) === job.id) this.slots.delete(job.slot);
+      const { ssml, billable } = this.ssml(job.line);
+      if (!this.affordable(job, billable)) {
+        // Not made; a later request may try again (and be refused again, quietly).
+        if (this.index.get(job.id)?.state === "pending") this.index.delete(job.id);
+        continue;
+      }
+      if (job.budget && job.line.scope === "room") {
+        const prev = this.spent.get(job.budget.key) ?? { chars: 0, at: 0 };
+        this.spent.set(job.budget.key, { chars: prev.chars + billable, at: Date.now() });
+      }
       this.running++;
-      void this.synthesize(job.id, job.line).finally(() => {
+      void this.synthesize(job.id, job.line, ssml, billable).finally(() => {
         this.running--;
         this.pump();
       });
     }
   }
 
-  private async synthesize(id: string, line: SpeechLine) {
+  private async synthesize(id: string, line: SpeechLine, ssml: string, billable: number) {
     try {
-      const { ssml, billable } = this.ssml(line);
       const audio = this.cfg.fake ? fakeClip(line.text) : await this.callAzure(ssml);
       this.cfg.onSynthesized?.(billable);
       const [scope, hash] = id.split("/");

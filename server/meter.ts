@@ -27,6 +27,8 @@ export class Meter {
   private lastTick = Date.now();
   private timer: ReturnType<typeof setInterval> | null = null;
   private writing: Promise<void> = Promise.resolve();
+  /** The file as last read or written, so this month's total is known without waiting. */
+  private saved: MeterData = {};
 
   constructor(
     private readonly file: string,
@@ -48,10 +50,17 @@ export class Meter {
     this.add({ starts: 1 });
     this.timer = setInterval(() => void this.flush(), FLUSH_MS);
     this.timer.unref?.();
+    if (this.opts.persist()) void readMeter(this.file).then((d) => (this.saved = d));
   }
 
   speech(chars: number) {
     this.add({ speechChars: chars, speechClips: 1 });
+  }
+
+  /** Speech characters this month so far (saved plus not yet written). */
+  speechThisMonth() {
+    const month = monthOf(this.now());
+    return (this.saved[month]?.speechChars ?? 0) + (this.delta[month]?.speechChars ?? 0);
   }
 
   private tick() {
@@ -63,8 +72,8 @@ export class Meter {
   /** Saved counts plus what hasn't been written yet. */
   async read(): Promise<MeterData> {
     this.tick();
-    const saved = this.opts.persist() ? await readMeter(this.file) : {};
-    return merge(saved, this.delta);
+    if (this.opts.persist()) this.saved = await readMeter(this.file);
+    return merge(this.saved, this.delta);
   }
 
   /** Add the in-memory counts to the file. */
@@ -75,9 +84,10 @@ export class Meter {
       const delta = this.delta;
       this.delta = {};
       try {
-        const body = JSON.stringify(merge(await readMeter(this.file), delta), null, 1);
-        await writeFile(`${this.file}.tmp`, body);
+        const next = merge(await readMeter(this.file), delta);
+        await writeFile(`${this.file}.tmp`, JSON.stringify(next, null, 1));
         await rename(`${this.file}.tmp`, this.file);
+        this.saved = next;
       } catch (err) {
         this.delta = merge(delta, this.delta); // try again next time
         this.opts.log("meter: write failed", err);
@@ -116,13 +126,15 @@ export interface MeterLimits {
   speechChars: number;
   /** Container Apps monthly free grant (180,000 vCPU-s, 360,000 GiB-s) at 0.25 vCPU / 0.5 GiB = 200 h. */
   runtimeHours: number;
+  /** Share of the speech limit at which new room clips stop for the rest of the month (stock lines are cached and go on). */
+  speechStopShare: number;
 }
 
-export const DEFAULT_LIMITS: MeterLimits = { speechChars: 500_000, runtimeHours: 200 };
+export const DEFAULT_LIMITS: MeterLimits = { speechChars: 500_000, runtimeHours: 200, speechStopShare: 0.85 };
 
 export interface MeterSummary {
   month: string;
-  speech: { chars: number; clips: number; free: number; share: number };
+  speech: { chars: number; clips: number; free: number; share: number; stopShare: number; paused: boolean };
   runtime: { hours: number; starts: number; free: number; share: number };
   total: { speechChars: number; hours: number };
 }
@@ -135,7 +147,14 @@ export function summarizeMeter(data: MeterData, limits: MeterLimits = DEFAULT_LI
   const round = (x: number, d: number) => Math.round(x * 10 ** d) / 10 ** d;
   return {
     month,
-    speech: { chars: m.speechChars, clips: m.speechClips, free: limits.speechChars, share: round(m.speechChars / limits.speechChars, 4) },
+    speech: {
+      chars: m.speechChars,
+      clips: m.speechClips,
+      free: limits.speechChars,
+      share: round(m.speechChars / limits.speechChars, 4),
+      stopShare: limits.speechStopShare,
+      paused: m.speechChars >= limits.speechChars * limits.speechStopShare,
+    },
     runtime: { hours: round(hours, 1), starts: m.starts, free: limits.runtimeHours, share: round(hours / limits.runtimeHours, 4) },
     total: {
       speechChars: all.reduce((a, x) => a + x.speechChars, 0),

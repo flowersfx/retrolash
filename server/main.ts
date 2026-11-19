@@ -41,11 +41,15 @@ const meter = new Meter(path.join(DATA_DIR, "meter.json"), { persist: () => pers
 const LIMITS = {
   speechChars: Number(process.env.SPEECH_FREE_CHARS) || DEFAULT_LIMITS.speechChars,
   runtimeHours: Number(process.env.FREE_RUNTIME_HOURS) || DEFAULT_LIMITS.runtimeHours,
+  speechStopShare: Number(process.env.SPEECH_STOP_SHARE) || DEFAULT_LIMITS.speechStopShare,
 };
 
 // Spoken prompts (optional). The key comes from a Container Apps secret.
 const speech = new AzureSpeech({
   onSynthesized: (chars) => meter.speech(chars),
+  // Near the free tier, stop making clips of player and facilitator text for the rest of the month.
+  // The stock lines are cached on disk, so games keep their voice for titles and chatter.
+  roomAllowed: () => meter.speechThisMonth() < LIMITS.speechChars * LIMITS.speechStopShare,
   dir: path.join(DATA_DIR, "tts"),
   region: process.env.SPEECH_REGION,
   key: process.env.SPEECH_KEY,

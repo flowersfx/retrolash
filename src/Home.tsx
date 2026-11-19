@@ -57,7 +57,7 @@ export default function Home({
 }
 
 type Meter = {
-  speech: { chars: number; free: number; share: number };
+  speech: { chars: number; free: number; share: number; paused?: boolean };
   runtime: { hours: number; free: number; share: number };
 };
 type Stats = {
@@ -103,7 +103,9 @@ function UsageLine() {
   const free = m
     ? [
         `${m.runtime.hours.toFixed(1)} h server time (${pct(m.runtime.share)} of the free ${num(m.runtime.free)} h)`,
-        m.speech.chars ? `${num(m.speech.chars)} speech characters (${pct(m.speech.share)} of the free ${num(m.speech.free)})` : null,
+        m.speech.chars
+          ? `${num(m.speech.chars)} speech characters (${pct(m.speech.share)} of the free ${num(m.speech.free)}${m.speech.paused ? "; reading answers aloud is paused until next month" : ""})`
+          : null,
       ].filter(Boolean)
     : [];
   return (
