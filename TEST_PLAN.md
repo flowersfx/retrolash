@@ -193,6 +193,9 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 13.8 | Three tabs as three players; answer in two, wait 20 s, switch to the third | The round still waits for the third |
 | 13.9 | On a phone in the lobby, tap *Leave the game* | Asks first; the player disappears from the lobby and the big screens show "👋 Name left the game"; the phone is back at the join form. Not offered mid-game |
 | 13.10 | Music through a whole game | Coffee Shop / Golden Hour in the lobby (taking turns), Desk Lamp while writing, Night Bus during matchups, a quiet pad while talking, Golden Hour for highlights/podium/summary. Changes land on a beat; nothing stutters |
+| 13.11 | Kudos with speech on | "For Ada: …" is read as each card lands; the cards wait for the voice. If it was silent, all of them are (never just some) |
+| 13.12 | 12+ players (or *Prompts per player: 1*) | One prompt each per round; the answering screen says "Everyone gets one prompt"; with trios, 12 players make 4 matchups |
+| 13.13 | Lobby | "Today's line-up" (Swedish "Dagens program") |
 | 13.6 | Lobby settings | Labelled rows (Rounds, Sprint format, Language + Look, Options); *More settings* opens an even three-column grid |
 
 ## Known gaps to check while testing

@@ -51,6 +51,8 @@ export interface Settings {
   speech: boolean;
   /** With TRIO_MIN_PLAYERS or more, matchups are three answers at once (shorter rounds). */
   trios: boolean;
+  /** Prompts each player answers per head-to-head round. 0 = auto (2, or 1 with ONE_PROMPT_MIN_PLAYERS+). */
+  promptsEach: number;
   /** Look of the big screen and phones. */
   theme: ThemeId;
 }
@@ -85,8 +87,18 @@ export const DEFAULT_SETTINGS: Settings = {
   pack: "mix",
   speech: true,
   trios: true,
+  promptsEach: 0,
   theme: "studio",
 };
+
+/** From this many players, everyone gets one prompt per round instead of two (when promptsEach is auto). */
+export const ONE_PROMPT_MIN_PLAYERS = 12;
+
+/** How many prompts each player gets per head-to-head round. */
+export function promptsEach(settings: Pick<Settings, "promptsEach">, players: number): 1 | 2 {
+  if (settings.promptsEach === 1 || settings.promptsEach === 2) return settings.promptsEach;
+  return players >= ONE_PROMPT_MIN_PLAYERS ? 1 : 2;
+}
 
 /** How many Sprint rounds "auto" gives: at least two, three for tiny teams. */
 export function autoSprintRounds(players: number) {
@@ -271,6 +283,10 @@ export interface HostView {
   followupItems?: FollowupItemView[];
   /** pollResult of a kudos round. */
   kudos?: KudosView[];
+  /** pollResult of a kudos round: when each card lands (ms after the screen appears), in step with the voice. */
+  kudosAt?: number[];
+  /** answering (head-to-head): prompts per player this round. */
+  promptsEach?: number;
   /** roundResult: someone new is in first place. */
   leadChange?: string;
   /** The server can synthesise speech (shows the lobby toggle). */

@@ -35,6 +35,7 @@ import {
   LANGS,
   MIN_PLAYERS,
   NO_TALK,
+  ONE_PROMPT_MIN_PLAYERS,
   HIGHLIGHT_STEP_MS,
   MOODS,
   PACKS,
@@ -506,7 +507,7 @@ function Stage({ view, send, msLeft, screen }: { view: HostView; send: Send; msL
       ) : null;
     case "pollResult":
       if (view.roundKind === "checkin") return <MoodResult counts={view.moodCounts ?? []} />;
-      if (view.roundKind === "kudos") return <KudosResult kudos={view.kudos ?? []} />;
+      if (view.roundKind === "kudos") return <KudosResult kudos={view.kudos ?? []} at={view.kudosAt} />;
       return <FollowupResult items={view.followupItems ?? []} />;
     case "roundResult":
       return <RoundResult view={view} />;
@@ -883,6 +884,14 @@ function SettingsPanel({
             {t.settings.lashVotes}
             <input type="number" min={1} max={5} value={settings.lashVotes} onChange={(e) => update({ lashVotes: +e.target.value })} />
           </label>
+          <label>
+            {t.settings.promptsEach}
+            <select value={settings.promptsEach} onChange={(e) => update({ promptsEach: +e.target.value })}>
+              <option value={0}>{t.settings.promptsAuto(ONE_PROMPT_MIN_PLAYERS)}</option>
+              <option value={1}>1</option>
+              <option value={2}>2</option>
+            </select>
+          </label>
           <label className="toggle wide">
             <input type="checkbox" checked={settings.trios} onChange={(e) => update({ trios: e.target.checked })} />
             <span>{t.settings.trios(TRIO_MIN_PLAYERS)}</span>
@@ -1063,7 +1072,9 @@ function Answering({ view }: { view: HostView }) {
         </ul>
       )}
       {isHeadToHead(kind) && (
-        <p className="muted big-text">{kind === "emoji" ? t.stage.emojiSub : t.stage.h2hSub}</p>
+        <p className="muted big-text">
+          {kind === "emoji" ? t.stage.emojiSub(view.promptsEach ?? 2) : t.stage.h2hSub(view.promptsEach ?? 2)}
+        </p>
       )}
       <DoneGrid view={view} />
       {isHeadToHead(kind) && <Commentary line={pick(P.commentary.answering, `${view.roundTitle}`)} />}
@@ -1514,15 +1525,16 @@ function KudosCard({ k, i }: { k: KudosView; i: number }) {
 }
 
 /** Kudos land on the wall one at a time. */
-function KudosResult({ kudos }: { kudos: KudosView[] }) {
+function KudosResult({ kudos, at }: { kudos: KudosView[]; at?: number[] }) {
   const t = useT();
   const [shown, setShown] = useState(REDUCED_MOTION ? kudos.length : 0);
   useEffect(() => {
+    // The server times the cards to the voice reading them (when it does).
     const timers = kudos.map((_, i) =>
       setTimeout(() => {
         setShown(i + 1);
         sfx.blip(i + 3);
-      }, 700 + i * 1800),
+      }, at?.[i] ?? 700 + i * 1800),
     );
     return () => timers.forEach(clearTimeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps

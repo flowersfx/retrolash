@@ -1,6 +1,6 @@
 // Quick checks for the pure helpers in shared/. Run: npx tsx scripts/selftest.ts
 import assert from "node:assert/strict";
-import { DEFAULT_SETTINGS, PACKS, emojiOnly, parsePreviousItems, places, planRounds } from "../shared/types";
+import { DEFAULT_SETTINGS, PACKS, emojiOnly, parsePreviousItems, places, planRounds, promptsEach } from "../shared/types";
 import { GameRoom, groupPlayers, type Connection, type Room } from "../server/game";
 import { prompts, sprintPrompts } from "../shared/prompts";
 import { titledPlan } from "../shared/i18n";
@@ -8,6 +8,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { AzureSpeech } from "../server/tts";
+import { FileStorage } from "../server/storage";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
 const md = `# Retro 2026-11-09
 
@@ -288,6 +290,76 @@ for (const n of [3, 4, 7, 8, 9, 10, 11, 16]) {
   g.onMessage(JSON.stringify({ t: "start" }), h);
   g.onMessage(JSON.stringify({ t: "leave" }), ps[0]);
   assert.ok(g.player("A"), "can't leave mid-game");
+  g.dispose();
+}
+
+// One prompt each for big teams: everyone in exactly one group, about half as many matchups.
+assert.equal(promptsEach(DEFAULT_SETTINGS, 11), 2);
+assert.equal(promptsEach(DEFAULT_SETTINGS, 12), 1);
+assert.equal(promptsEach({ promptsEach: 2 }, 16), 2, "the facilitator can keep two");
+for (const n of [4, 5, 12, 13, 14, 16]) {
+  const ids = Array.from({ length: n }, (_, i) => `q${i}`);
+  for (const trios of [false, true]) {
+    const groups = groupPlayers(ids, trios, 1);
+    const all = groups.flat();
+    assert.equal(all.length, n, `n=${n} trios=${trios}: one prompt each`);
+    assert.equal(new Set(all).size, n);
+    assert.ok(groups.every((g) => g.length === 2 || g.length === 3));
+  }
+}
+assert.equal(groupPlayers(Array.from({ length: 12 }, (_, i) => `r${i}`), true, 1).length, 4, "12 players, trios, one each: 4 matchups");
+
+// Saved games: the last good save survives a broken main file.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), "retrolash-store-"));
+  const file = path.join(dir, "abcd.json");
+  const opts = { persist: () => true, log: () => {} };
+  const a = new FileStorage(file, opts);
+  await a.put("state", { n: 1 });
+  await a.put("state", { n: 2 });
+  await a.flush();
+  assert.ok(existsSync(`${file}.bak`), "previous save kept as .bak");
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).state, { n: 2 });
+  writeFileSync(file, '{"state": {"n": 3'); // a write cut off half-way
+  const b = new FileStorage(file, opts);
+  assert.ok(((await b.get<{ n: number }>("state"))?.n ?? 0) >= 1, "falls back to the backup");
+  writeFileSync(file, "");
+  writeFileSync(`${file}.bak`, "garbage");
+  writeFileSync(`${file}.tmp`, JSON.stringify({ state: { n: 9 } }));
+  assert.deepEqual(await new FileStorage(file, opts).get("state"), { n: 9 }, "then to an unfinished temp file");
+}
+
+// Kudos read aloud: with every clip ready, each card lands with its voice line, spaced to fit.
+{
+  const sp = new AzureSpeech({ dir: mkdtempSync(path.join(tmpdir(), "retrolash-tts2-")), voices: { en: "en-US-JennyNeural", sv: "sv-SE-SofieNeural" }, fake: true, log: () => {} });
+  await sp.init();
+  const cs: FakeConn[] = [];
+  const g = new GameRoom({ id: "kdos", storage: { get: async () => undefined, put: async () => {} }, getConnections: () => cs }, 0.1, sp);
+  await g.onStart();
+  const join = (id: string, hello: object) => {
+    const c = new FakeConn(id);
+    cs.push(c);
+    g.onMessage(JSON.stringify(hello), c);
+    return c;
+  };
+  const h = join("h", { t: "helloHost" });
+  const ps = ["Ann", "Bo", "Cy"].map((n) => join(n, { t: "helloPlayer", name: n }));
+  g.onMessage(JSON.stringify({ t: "settings", settings: { rounds: ["kudos"] } }), h);
+  g.onMessage(JSON.stringify({ t: "start" }), h);
+  g.advance(); // answering
+  g.onMessage(JSON.stringify({ t: "kudos", to: "Bo", text: "Thanks for the reviews" }), ps[0]);
+  g.onMessage(JSON.stringify({ t: "kudos", to: "team", text: "Great sprint everyone" }), ps[1]);
+  await new Promise((r) => setTimeout(r, 300)); // fake speech makes those two clips
+  g.onMessage(JSON.stringify({ t: "kudos", to: "Ann", text: "Saved the demo" }), ps[2]);
+  assert.equal(g.state.phase, "answering", "the last note's clip gets a moment before the reveal");
+  await new Promise((r) => setTimeout(r, 600)); // the wait is 3 s × 0.1
+  assert.equal(g.state.phase, "pollResult");
+  const v = g.hostView();
+  assert.equal(v.kudos?.length, 3);
+  const spoken = (v.say ?? []).filter((c) => c.at !== undefined);
+  assert.equal(spoken.length, 3, "every note is read");
+  assert.deepEqual(spoken.map((c) => c.at), v.kudosAt, "each card lands as its note is read");
+  assert.ok(v.kudosAt![1] - v.kudosAt![0] >= spoken[0].ms, "cards wait for the voice");
   g.dispose();
 }
 

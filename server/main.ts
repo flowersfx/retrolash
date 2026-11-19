@@ -7,11 +7,12 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createReadStream } from "node:fs";
-import { appendFile, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
-import { GameRoom, type Connection, type Room, type RoomStorage } from "./game";
+import { GameRoom, type Connection, type Room } from "./game";
+import { FileStorage } from "./storage";
 import { AzureSpeech } from "./tts";
 
 const PORT = Number(process.env.PORT ?? 1999);
@@ -72,62 +73,12 @@ async function initStorage() {
   }
 }
 
-/** File-backed storage for one room. Writes are coalesced and atomic. */
-class FileStorage implements RoomStorage {
-  private cache = new Map<string, unknown>();
-  private pending: Promise<void> | null = null;
-  private dirty = false;
-
-  constructor(private readonly file: string) {}
-
-  async get<T>(key: string): Promise<T | undefined> {
-    if (persist && this.cache.size === 0) {
-      try {
-        const raw = JSON.parse(await readFile(this.file, "utf8")) as Record<string, unknown>;
-        for (const [k, v] of Object.entries(raw)) this.cache.set(k, v);
-      } catch {
-        // No saved state yet, or unreadable: start fresh.
-      }
-    }
-    return this.cache.get(key) as T | undefined;
-  }
-
-  put<T>(key: string, value: T): Promise<void> {
-    // Snapshot now: the game mutates its state object in place.
-    this.cache.set(key, structuredClone(value));
-    if (!persist) return Promise.resolve();
-    this.dirty = true;
-    this.pending ??= this.flushLoop();
-    return this.pending;
-  }
-
-  flush(): Promise<void> {
-    return this.pending ?? Promise.resolve();
-  }
-
-  private async flushLoop() {
-    try {
-      while (this.dirty) {
-        this.dirty = false;
-        const body = JSON.stringify(Object.fromEntries(this.cache));
-        const tmp = `${this.file}.tmp`;
-        await writeFile(tmp, body);
-        await rename(tmp, this.file);
-      }
-    } catch (err) {
-      log(`failed to save ${path.basename(this.file)}`, err);
-    } finally {
-      this.pending = null;
-    }
-  }
-}
-
 async function sweepOldGames() {
   if (!persist) return;
   const cutoff = Date.now() - ROOM_TTL_HOURS * 3_600_000;
   for (const name of await readdir(DATA_DIR).catch(() => [] as string[])) {
-    // <id>.json, or a <id>.json.tmp left behind by a crash mid-write.
-    const m = /^([a-z]{4})\.json(\.tmp)?$/.exec(name);
+    // <id>.json, its <id>.json.bak, or a <id>.json.tmp left behind by a crash mid-write.
+    const m = /^([a-z]{4})\.json(\.tmp|\.bak)?$/.exec(name);
     if (!m) continue;
     const id = m[1];
     if (rooms.has(id)) continue;
@@ -167,7 +118,7 @@ class RoomHost implements Room {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(readonly id: string) {
-    this.storage = new FileStorage(path.join(DATA_DIR, `${id}.json`));
+    this.storage = new FileStorage(path.join(DATA_DIR, `${id}.json`), { persist: () => persist, log });
     this.game = new GameRoom(this, TIME_SCALE, speech, recordUsage);
     this.ready = this.game.onStart();
     this.queue = this.ready.catch((err) => log(`room ${id} failed to start`, err));

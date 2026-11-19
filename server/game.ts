@@ -19,6 +19,7 @@ import {
   MIN_PLAYERS,
   MOODS,
   NO_TALK,
+  promptsEach,
   PACKS,
   PLATE_COLORS,
   REACTIONS,
@@ -154,6 +155,10 @@ interface Round {
   kudos?: Record<string, { to: string; text: string }>;
   /** Kudos authors in reveal order (shuffled, so order says nothing). */
   kudosOrder?: string[];
+  /** When each kudos card lands on screen (ms), in step with the voice when it reads them. */
+  kudosAt?: number[];
+  /** Already held the reveal once to let the last clips finish. */
+  kudosWaited?: boolean;
 }
 
 interface GameState {
@@ -198,6 +203,12 @@ const FOLLOWUP_RESULT_MIN_MS = 20000;
 const PODIUM_MS = 15000;
 /** When all players are done but the audience isn't, give them this long. */
 const AUDIENCE_GRACE_MS = 5000;
+/** Kudos cards: when the first lands, and the gap between them (longer when the voice reads them). */
+const KUDOS_FIRST_MS = 700;
+const KUDOS_FIRST_SPOKEN_MS = 2400;
+const KUDOS_STEP_MS = 1800;
+/** How long the end of the kudos round waits for the last notes' clips. */
+const KUDOS_WAIT_MS = 3000;
 /**
  * A player whose phone drops (screen off, app switch, reconnect, server restart)
  * is still waited for this long. Without it, a phone blinking offline for a
@@ -689,6 +700,7 @@ export class GameRoom {
         const text = clean(msg.text, MAX_KUDOS_LENGTH);
         if (!to || !text) return;
         (round.kudos ??= {})[playerId] = { to, text };
+        this.prefetchSpeech([this.kudosLine({ to, text })]);
         break;
       }
       case "vote": {
@@ -776,6 +788,7 @@ export class GameRoom {
       const groups = groupPlayers(
         players.map((p) => p.id),
         this.state.settings.trios && players.length >= TRIO_MIN_PLAYERS,
+        promptsEach(this.state.settings, players.length),
       );
       const prompts = this.pickPrompts(round.kind, groups.length);
       round.matchups = groups.map((ids, i) => ({
@@ -816,8 +829,31 @@ export class GameRoom {
       const order = shuffle(Object.keys(round.kudos ?? {}));
       if (order.length === 0) return this.nextRound();
       round.kudosOrder = order;
+      // Read every note as its card lands, if all the clips are ready (all or none:
+      // nobody's thanks gets skipped). Otherwise the cards land on the usual beat.
+      const notes = order.map((id) => ({ ...this.line(this.kudosLine(round.kudos![id])), optional: false }));
+      const clips = this.speech?.enabled && this.state.settings.speech ? notes.map((l) => this.speech!.get(l)) : [];
+      const voiced = clips.length > 0 && clips.every((c) => c);
+      // The last note was probably sent a moment ago: give its clip a few seconds once.
+      if (clips.length > 0 && !voiced && !round.kudosWaited) {
+        round.kudosWaited = true;
+        this.state.deadline = Date.now() + KUDOS_WAIT_MS * this.timeScale;
+        this.armTimer();
+        return;
+      }
+      const at: number[] = [];
+      let cursor = voiced ? KUDOS_FIRST_SPOKEN_MS : KUDOS_FIRST_MS;
+      order.forEach((_, i) => {
+        at.push(cursor);
+        cursor += voiced ? Math.max(KUDOS_STEP_MS, clips[i]!.ms + 600) : KUDOS_STEP_MS;
+      });
+      round.kudosAt = at;
+      const lines: TimedLine[] = [
+        this.chatter(say.poll.kudos),
+        ...(voiced ? notes.map((l, i) => ({ ...l, at: at[i] })) : []),
+      ];
       const ms = Math.min(60000, Math.max(12000, 4000 + order.length * 3500));
-      return this.spokenPhase("pollResult", ms, [this.chatter(say.poll.kudos)], 0);
+      return this.spokenPhase("pollResult", ms, lines, 2500);
     }
     if (round.kind === "lastlash") {
       round.lashAnswers = shuffle(round.lashAnswers);
@@ -923,6 +959,12 @@ export class GameRoom {
       .filter((a): a is string => !!a)
       .map((a, i) => ({ ...this.line(a), ...(i === 0 ? { at: 1300 } : {}) }));
     return lines.every((l) => this.speech!.get(l)) ? lines : [];
+  }
+
+  /** A kudos note as the voice says it: "For Ada: thanks for the reviews". */
+  kudosLine(k: { to: string; text: string }) {
+    const to = k.to === KUDOS_TEAM ? null : this.name(k.to);
+    return this.t().spoken.kudos(to, k.text);
   }
 
   /** Queue player text for speech (when the room has speech on). */
@@ -1489,12 +1531,19 @@ export class GameRoom {
     if (round && s.phase === "pollResult") {
       if (round.kind === "checkin") view.moodCounts = this.moodCounts(round);
       if (round.kind === "followup") view.followupItems = this.followupView(round);
-      if (round.kind === "kudos") view.kudos = this.kudosView(round);
+      if (round.kind === "kudos") {
+        view.kudos = this.kudosView(round);
+        if (round.kudosAt) view.kudosAt = round.kudosAt;
+      }
     }
     if (round?.kind === "followup" && s.phase === "answering") {
       view.followupItems = (round.followupItems ?? []).map((text) => ({ text, counts: [] }));
     }
     if (s.phase === "roundResult" && s.leadChange) view.leadChange = s.leadChange;
+    if (s.phase === "answering" && round && isHeadToHead(round.kind) && round.matchups.length) {
+      const first = round.matchups[0].playerIds[0];
+      view.promptsEach = round.matchups.filter((m) => m.playerIds.includes(first)).length;
+    }
     if (s.phase === "highlights") view.highlights = this.highlights();
     if (s.phase === "summary") view.summary = this.summary();
     return view;
@@ -1721,27 +1770,38 @@ function sanitizeSettings(s: Settings): Settings {
     pack: PACKS.includes(s.pack) ? s.pack : DEFAULT_SETTINGS.pack,
     speech: s.speech !== false,
     trios: s.trios !== false,
+    promptsEach: clamp(s.promptsEach, 0, 2, DEFAULT_SETTINGS.promptsEach),
     theme: THEMES.includes(s.theme) ? s.theme : DEFAULT_SETTINGS.theme,
   };
 }
 
 /**
- * Who meets whom. Everyone gets two prompts. Normally that's a circle of pairs;
- * with trios on, groups of three (plus a pair or two when the numbers don't
- * divide), reshuffled until nobody is in a group twice and as few people as
- * possible meet twice.
+ * Who meets whom. Everyone gets `each` prompts (two, or one in big teams).
+ * Two each without trios is a circle of pairs. Otherwise groups of three (with
+ * trios) or two, plus whatever the numbers need to come out even, reshuffled
+ * until nobody is in a group twice and as few people as possible meet twice.
  */
-export function groupPlayers(ids: string[], trios: boolean): string[][] {
+export function groupPlayers(ids: string[], trios: boolean, each: 1 | 2 = 2): string[][] {
   const n = ids.length;
   const circle = () => ids.map((id, i) => [id, ids[(i + 1) % n]]);
-  if (!trios || n < 4) return circle();
-  const slots = 2 * n;
-  const pairs = [0, 2, 1][slots % 3];
-  const sizes = [...Array<number>((slots - 2 * pairs) / 3).fill(3), ...Array<number>(pairs).fill(2)];
+  if (each === 2 && (!trios || n < 4)) return circle();
+  const slots = each * n;
+  let threes: number;
+  let pairs: number;
+  if (trios) {
+    pairs = [0, 2, 1][slots % 3];
+    threes = (slots - 2 * pairs) / 3;
+  } else {
+    // One prompt each in pairs; an odd one out makes a single three-way.
+    threes = slots % 2;
+    pairs = (slots - 3 * threes) / 2;
+  }
+  if (pairs < 0 || slots < 2) return circle();
+  const sizes = [...Array<number>(threes).fill(3), ...Array<number>(pairs).fill(2)];
   let best: string[][] | null = null;
   let bestRepeats = Infinity;
   for (let attempt = 0; attempt < 500 && bestRepeats > 0; attempt++) {
-    const seq = [...shuffle(ids), ...shuffle(ids)];
+    const seq = each === 2 ? [...shuffle(ids), ...shuffle(ids)] : shuffle(ids);
     const groups: string[][] = [];
     let k = 0;
     for (const size of shuffle(sizes)) {
