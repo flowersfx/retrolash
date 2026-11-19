@@ -56,25 +56,60 @@ export default function Home({
   );
 }
 
-type Stats = { games: number; thisMonth: number; players: number; minutes: number; actionItems: number; ownedShare: number; kudos: number };
+type Meter = {
+  speech: { chars: number; free: number; share: number };
+  runtime: { hours: number; free: number; share: number };
+};
+type Stats = {
+  games: number;
+  thisMonth: number;
+  players: number;
+  minutes: number;
+  actionItems: number;
+  ownedShare: number;
+  kudos: number;
+  meter?: Meter;
+};
 
-/** A quiet line with the running totals (from /api/stats). Nothing until there's something to show. */
+/** 0.0042 → "0.4%", 0.27 → "27%". */
+const pct = (share: number) => {
+  const p = share * 100;
+  return `${p < 10 ? p.toFixed(1) : Math.round(p)}%`;
+};
+const num = (n: number) => n.toLocaleString("en-US");
+
+/** Quiet lines with the running totals and this month's free-tier use (from /api/stats). Nothing until there's something to show. */
 function UsageLine() {
   const [s, setS] = useState<Stats | null>(null);
   useEffect(() => {
     const base = import.meta.env.DEV ? `${location.protocol}//${PARTY_HOST}` : "";
     fetch(`${base}/api/stats`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((x: Stats | null) => x && x.games > 0 && setS(x))
+      .then((x: Stats | null) => x && setS(x))
       .catch(() => {});
   }, []);
   if (!s) return null;
-  const parts = [
-    `${s.games} ${s.games === 1 ? "retro" : "retros"} played`,
-    s.thisMonth ? `${s.thisMonth} this month` : null,
-    `${Math.round(s.players)} players and ${Math.round(s.minutes)} min on average`,
-    s.actionItems ? `${s.actionItems} action items (${Math.round(s.ownedShare * 100)}% owned)` : null,
-    s.kudos ? `${s.kudos} kudos` : null,
-  ].filter(Boolean);
-  return <p className="usage-line">{parts.join(" · ")}</p>;
+  const games =
+    s.games > 0
+      ? [
+          `${s.games} ${s.games === 1 ? "retro" : "retros"} played`,
+          s.thisMonth ? `${s.thisMonth} this month` : null,
+          `${Math.round(s.players)} players and ${Math.round(s.minutes)} min on average`,
+          s.actionItems ? `${s.actionItems} action items (${Math.round(s.ownedShare * 100)}% owned)` : null,
+          s.kudos ? `${s.kudos} kudos` : null,
+        ].filter(Boolean)
+      : [];
+  const m = s.meter;
+  const free = m
+    ? [
+        `${m.runtime.hours.toFixed(1)} h server time (${pct(m.runtime.share)} of the free ${num(m.runtime.free)} h)`,
+        m.speech.chars ? `${num(m.speech.chars)} speech characters (${pct(m.speech.share)} of the free ${num(m.speech.free)})` : null,
+      ].filter(Boolean)
+    : [];
+  return (
+    <>
+      {games.length > 0 && <p className="usage-line">{games.join(" · ")}</p>}
+      {free.length > 0 && <p className="usage-line">This month: {free.join(" · ")}</p>}
+    </>
+  );
 }

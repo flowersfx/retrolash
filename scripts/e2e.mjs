@@ -236,6 +236,9 @@ async function check(v) {
   if (g.bots < PLAYERS || g.active !== PLAYERS || !g.game || g.screens !== 1 || !g.vip) fail(`usage fields wrong: ${JSON.stringify(g)}`);
   const stats = await (await fetch(`${base}/api/stats`)).json();
   if (stats.games !== 0 || stats.tests < 2) fail(`/api/stats should leave the bot game out: ${JSON.stringify(stats)}`);
+  const meter = stats.meter;
+  if (!(meter?.speech.clips > 0 && meter.speech.chars > meter.speech.clips && meter.runtime.starts === 1 && meter.speech.free === 500000)) fail(`/api/stats meter wrong: ${JSON.stringify(meter)}`);
+  console.log(`meter: ${JSON.stringify(meter)}`);
   if (!tv.phases.has("summary") || !tv.phases.has("matchupResult")) fail(`the extra screen missed screens: ${[...tv.phases]}`);
   if (tv.reactions === 0) fail("the extra screen got no reactions");
   console.log(`extra screen: ${tv.views} views, ${tv.reactions} reactions`);

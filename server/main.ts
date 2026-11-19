@@ -15,6 +15,7 @@ import { GameRoom, type Connection, type Room } from "./game";
 import { FileStorage } from "./storage";
 import { parseUsage, summarize, type UsageSummary } from "./usage";
 import { AzureSpeech } from "./tts";
+import { DEFAULT_LIMITS, Meter, summarizeMeter, type MeterSummary } from "./meter";
 import { strings } from "../shared/i18n";
 
 const PORT = Number(process.env.PORT ?? 1999);
@@ -35,8 +36,16 @@ const STATIC_DIR =
   process.env.STATIC_DIR ??
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
 
+/** Free-tier meter: speech characters and runtime per month (DATA_DIR/meter.json). */
+const meter = new Meter(path.join(DATA_DIR, "meter.json"), { persist: () => persist, log: (...args) => log(...args) });
+const LIMITS = {
+  speechChars: Number(process.env.SPEECH_FREE_CHARS) || DEFAULT_LIMITS.speechChars,
+  runtimeHours: Number(process.env.FREE_RUNTIME_HOURS) || DEFAULT_LIMITS.runtimeHours,
+};
+
 // Spoken prompts (optional). The key comes from a Container Apps secret.
 const speech = new AzureSpeech({
+  onSynthesized: (chars) => meter.speech(chars),
   dir: path.join(DATA_DIR, "tts"),
   region: process.env.SPEECH_REGION,
   key: process.env.SPEECH_KEY,
@@ -72,13 +81,14 @@ const log = (...args: unknown[]) => console.log(new Date().toISOString(), ...arg
 
 // ---------- usage summary (landing page) ----------
 
-let statsCache: { at: number; value: UsageSummary } | null = null;
+type Stats = UsageSummary & { meter: MeterSummary };
+let statsCache: { at: number; value: Stats } | null = null;
 
-/** The usage summary, re-read at most once a minute. */
-async function usageStats(): Promise<UsageSummary> {
+/** The usage summary and free-tier meter, re-read at most once a minute. */
+async function usageStats(): Promise<Stats> {
   if (statsCache && Date.now() - statsCache.at < 60_000) return statsCache.value;
   const text = persist ? await readFile(path.join(DATA_DIR, "usage.jsonl"), "utf8").catch(() => "") : "";
-  const value = summarize(parseUsage(text));
+  const value = { ...summarize(parseUsage(text)), meter: summarizeMeter(await meter.read(), LIMITS) };
   statsCache = { at: Date.now(), value };
   return value;
 }
@@ -222,7 +232,10 @@ function createRoom(id: string, ip: string): RoomHost | null {
     return null;
   }
   const room = makeRoom(id);
-  if (room) created.set(ip, [...recent, now]);
+  if (room) {
+    created.set(ip, [...recent, now]);
+    log(`new room ${id.toUpperCase()} from ${maskIp(ip)}`);
+  }
   return room;
 }
 
@@ -359,6 +372,13 @@ const http = createServer((req, res) => {
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
 
+/** Enough of an address to tell clients apart in the log (and see it isn't the ingress), not to identify anyone. */
+function maskIp(ip: string) {
+  const v4 = /^(?:::ffff:)?(\d+)\.(\d+)\.\d+\.\d+$/.exec(ip);
+  if (v4) return `${v4[1]}.${v4[2]}.x.x`;
+  return ip.includes(":") ? `${ip.split(":").slice(0, 3).join(":")}:…` : "?";
+}
+
 /** The client's address. Behind the Container Apps ingress the real one is the last X-Forwarded-For entry. */
 function clientIp(req: IncomingMessage) {
   const fwd = req.headers["x-forwarded-for"];
@@ -460,12 +480,14 @@ async function shutdown(signal: string) {
   http.close();
   for (const ws of wss.clients) ws.close(1012, "Server restarting");
   await Promise.all([...rooms.values()].map((r) => r.close()));
+  await meter.stop();
   process.exit(0);
 }
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 
 await initStorage();
+meter.start();
 await sweepOldGames();
 if (persist) await speech.init().catch((err) => log("speech: cache init failed", err));
 await speech.sweep(ROOM_TTL_HOURS * 3_600_000);

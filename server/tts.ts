@@ -29,6 +29,8 @@ export interface SpeechConfig {
   voices: Record<Lang, string>;
   /** Speaking style per language, e.g. "cheerful" (only for voices that support it). */
   styles?: Partial<Record<Lang, string>>;
+  /** Called with the billable characters of each clip made (for the free-tier meter). */
+  onSynthesized?: (chars: number) => void;
   /** Test hook: write fake clips instead of calling Azure. */
   fake?: boolean;
   log: (...args: unknown[]) => void;
@@ -131,7 +133,9 @@ export class AzureSpeech implements Speech {
 
   private async synthesize(id: string, line: SpeechLine) {
     try {
-      const audio = this.cfg.fake ? fakeClip(line.text) : await this.callAzure(line);
+      const { ssml, billable } = this.ssml(line);
+      const audio = this.cfg.fake ? fakeClip(line.text) : await this.callAzure(ssml);
+      this.cfg.onSynthesized?.(billable);
       const [scope, hash] = id.split("/");
       await writeFile(path.join(this.cfg.dir, scope, `${hash}.mp3`), audio);
       this.index.set(id, { state: "ready", ms: audio.length / BYTES_PER_MS });
@@ -141,16 +145,23 @@ export class AzureSpeech implements Speech {
     }
   }
 
-  private async callAzure(line: SpeechLine): Promise<Buffer> {
+  /**
+   * The request body, and what Azure bills for it: every character inside
+   * <voice>, markup included (only the <speak> and <voice> tags are free).
+   */
+  ssml(line: SpeechLine) {
     const voice = this.cfg.voices[line.lang] ?? this.cfg.voices.en;
     const xmlLang = voice.split("-").slice(0, 2).join("-");
     const style = this.cfg.styles?.[line.lang];
     const body = `<prosody rate="+4%">${escapeXml(line.text)}</prosody>`;
+    const inner = style ? `<mstts:express-as style="${escapeXml(style)}">${body}</mstts:express-as>` : body;
     const ssml =
       `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="${xmlLang}">` +
-      `<voice name="${voice}">` +
-      (style ? `<mstts:express-as style="${escapeXml(style)}">${body}</mstts:express-as>` : body) +
-      `</voice></speak>`;
+      `<voice name="${voice}">${inner}</voice></speak>`;
+    return { ssml, billable: [...inner].length };
+  }
+
+  private async callAzure(ssml: string): Promise<Buffer> {
     for (let attempt = 0; ; attempt++) {
       const res = await fetch(`https://${this.cfg.region}.tts.speech.microsoft.com/cognitiveservices/v1`, {
         method: "POST",

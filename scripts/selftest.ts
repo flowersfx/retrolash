@@ -8,6 +8,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { AzureSpeech } from "../server/tts";
+import { Meter, summarizeMeter } from "../server/meter";
 import { FileStorage } from "../server/storage";
 import { parseUsage, summarize } from "../server/usage";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -316,6 +317,40 @@ for (const n of [3, 4, 7, 8, 9, 10, 11, 16]) {
   assert.equal(g.pidOf(c), "old-phone", "an old saved player is picked up by its device");
   assert.equal(g.player("old-phone")?.score, 40);
   g.dispose();
+}
+
+// Free-tier meter: two overlapping revisions both land their counts; shares follow the limits.
+{
+  const file = path.join(mkdtempSync(path.join(tmpdir(), "retrolash-meter-")), "meter.json");
+  let t = Date.parse("2026-11-19T10:00:00Z");
+  const opts = { persist: () => true, log: () => {}, now: () => t };
+  const a = new Meter(file, opts);
+  const b = new Meter(file, opts);
+  a.start();
+  b.start();
+  a.speech(1000);
+  b.speech(500);
+  t += 3_600_000; // an hour later
+  await a.flush();
+  await b.flush();
+  await a.stop();
+  await b.stop();
+  const m = JSON.parse(readFileSync(file, "utf8"))["2026-11"];
+  assert.deepEqual([m.speechChars, m.speechClips, m.starts, m.runtimeSec], [1500, 2, 2, 7200], "both revisions counted");
+  const sum = summarizeMeter({ "2026-11": m }, { speechChars: 500_000, runtimeHours: 200 }, new Date(t));
+  assert.equal(sum.speech.share, 0.003);
+  assert.equal(sum.runtime.hours, 2);
+  assert.equal(sum.runtime.share, 0.01);
+  assert.equal(summarizeMeter({ "2026-10": m }, undefined, new Date(t)).speech.chars, 0, "a new month starts at zero");
+}
+
+// Billable speech characters: the text plus the markup inside <voice>.
+{
+  const sp = new AzureSpeech({ dir: tmpdir(), voices: { en: "en-US-JennyNeural", sv: "sv-SE-SofieNeural" }, styles: { en: "cheerful" }, log: () => {} });
+  const { ssml, billable } = sp.ssml({ text: "Hi & bye", lang: "en", scope: "lib" });
+  const inner = ssml.slice(ssml.indexOf("<voice") , ssml.indexOf("</voice>")).replace(/^<voice[^>]*>/, "");
+  assert.equal(billable, inner.length);
+  assert.ok(inner.includes("&amp;") && inner.startsWith("<mstts:express-as"), "escaped text and markup both count");
 }
 
 // One prompt each for big teams: everyone in exactly one group, about half as many matchups.
