@@ -7,7 +7,7 @@
     "build": "vite build && node scripts/build-server.mjs",
     "start": "node --enable-source-maps dist-server/main.js",
     "typecheck": "tsc",
-    "test": "tsx scripts/selftest.ts && npm run build && node scripts/e2e.mjs sv && node scripts/e2e.mjs en"
+    "test": "tsx scripts/selftest.ts && npm run build && node scripts/e2e.mjs sv && node scripts/e2e.mjs en && node scripts/e2e.mjs en 9"
   },
   "dependencies": {
     "partysocket": "^1.3.0",

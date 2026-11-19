@@ -347,7 +347,7 @@ const heartbeat = setInterval(() => {
       conn.ws.ping();
     }
   }
-}, 25_000);
+}, 10_000); // short, so a phone that went to sleep shows as gone quickly and can be picked up again
 
 const sweeper = setInterval(() => {
   void sweepOldGames();

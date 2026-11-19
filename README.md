@@ -7,7 +7,7 @@ A Quiplash-style party game for Scrum retrospectives. The meeting-room screen ho
 1. **Lobby.** The host opens the site on the big screen and clicks *Host a retro*. Players scan the QR code (or enter the 4-letter room code) and type a name. You need at least 3 players. The lobby shows tonight's line-up of rounds.
 2. **Check-in.** Everyone picks a sprint "weather" (☀️ to ⛈️) on their phone. The big screen shows the spread, never who picked what.
 3. **Did we do it?** Only when you paste last retro's action items in the lobby settings. Everyone marks each item ✅ done, 🟡 partly or ❌ not done.
-4. **Warm-up.** A pure-fun icebreaker. Each player gets two silly prompts. Every prompt goes to two players, and their answers go head-to-head on the big screen while everyone else votes.
+4. **Warm-up.** A pure-fun icebreaker. Each player gets two silly prompts. Every prompt goes to two players, and their answers go head-to-head on the big screen while everyone else votes. With **8 or more players**, most prompts go to three players instead, and three answers battle at once, so the rounds stay short (switch off under *More settings*).
 5. **Emoji Only.** Same format, but answers are emoji only.
 6. **The Sprint.** Head-to-head with retro prompts ("The thing that slowed us down the most", "If this sprint was a movie…"). It's played over at least two rounds (three with only three players), and later rounds score more. After each matchup there's a discussion pause with a talking point and a 60-second timer. Pick a **Sprint format** in the lobby to use prompts after a classic retro format: Start · Stop · Continue, 4Ls, Sailboat, or Mad · Sad · Glad.
 7. **Kudos.** Everyone writes an anonymous shout-out to a teammate (or the whole team). The notes land on the big screen one by one.
@@ -18,6 +18,8 @@ A Quiplash-style party game for Scrum retrospectives. The meeting-room screen ho
 Everything up to the Last Lash results moves on by itself on timers, so the game keeps going even if the facilitator gets pulled into the discussion. The Last Lash results and the summary wait for the facilitator.
 
 The whole game (screens, phones, prompts and the Markdown export) is available in **English and Swedish**; switch in the lobby.
+
+Voters who like none of the answers can tap **🤷 Neither**: it counts as voted, and nobody gets the point. A vote can be changed until time runs out.
 
 As in Quiplash, answers are anonymous while people vote. After the vote, the screen shows who wrote what, and the voters' avatars fly onto the answer they picked. You can switch on **Anonymous mode** in the lobby to hide authors, voters and scores entirely. Owners of action items are always shown, because volunteering is a deliberate choice.
 
@@ -33,7 +35,7 @@ Someone dropping in mid-retro (a PO, a manager) can tap **Join as audience** on 
 - Win streaks ("Hat trick!"), comebacks from last place and lead changes get called out.
 - The Last Lash results reveal from the bottom up with a drumroll.
 - A small QR code in the header lets latecomers join mid-game.
-- **Spoken prompts:** the voice announces each round ("Round 3. The Sprint!"), reads the prompts and names the winner on the podium. With Azure AI Speech set up (see [infra/README.md](infra/README.md)), the big screen reads round titles and prompts aloud in English or Swedish, and the intros stretch to fit. Toggle it in the lobby; the 🎵 panel has a voice volume. Without Speech the game simply runs silent.
+- **Spoken prompts:** the voice welcomes everyone, announces each round ("Round 3. The Sprint!"), reads the prompts, reacts to results ("Ooh, that was close!"), wraps up, and names the winner on the podium. Answers aren't read aloud. With Azure AI Speech set up (see [infra/README.md](infra/README.md)), the big screen reads round titles and prompts aloud in English or Swedish, and the intros stretch to fit. Toggle it in the lobby; the 🎵 panel has a voice volume. Without Speech the game simply runs silent.
 - Sound effects and a background music loop are generated in the browser. 🔊 mutes everything; 🎵 opens music on/off and separate volume sliders for music and sound effects (remembered in the browser). Browsers only allow sound after the first click or key press on the page.
 - Players can tap emoji reactions on their phone while they wait. The reactions float up on the big screen.
 - A 🆘 *Help me* button on the phone fills in a ready-made silly answer when someone is stuck. If a player runs out of time, the game answers for them the same way, so no matchup is a walkover. An auto-answer is marked on the card after the vote and earns half points.
@@ -41,6 +43,8 @@ Someone dropping in mid-retro (a PO, a manager) can tap **Join as audience** on 
 ### Facilitator controls (big screen)
 
 - The browser that opens a room first becomes its big screen and keeps a secret for it. Another browser opening `/?host=<code>` is turned away, so players who see the room code can't take over. On another laptop, start a new room, or make someone VIP to run the game from a phone.
+- **Extra screens** for a second meeting room or remote people: `/?screen=<code>` (the lobby shows the link). They show the same show with their own sound, but can't control anything. See [docs/TEAMS.md](docs/TEAMS.md) for running hybrid retros with Teams.
+- **Look:** *Studio* (default, calmer colours for meeting rooms) or *Party* (the original neon), in the lobby. Emoji come from one web font (Noto Color Emoji), so they look the same on every device.
 
 - **Space**, **→** or **Page Down** advances or skips the timer, presenter-clicker style.
 - **P** holds the timer (for a longer discussion) and resumes it.
@@ -52,7 +56,7 @@ Someone dropping in mid-retro (a PO, a manager) can tap **Join as audience** on 
 
 - Players pick their avatar and name-plate colour when joining (and can change it in the lobby).
 - After each matchup, the phone shows your own result: won or lost, the votes, the points.
-- Closing the tab by mistake is fine: opening the link again offers **Continue as …**.
+- Closing the tab by mistake, or a phone dropping it while the screen is off, is fine: opening the link again picks up the same player. Joining from another browser with the same name takes over that player if it's offline. *Not you? Join as someone else* in the lobby starts over; `/?room=<code>&new` skips the automatic rejoin (for testing several players in one browser).
 
 ## Development
 

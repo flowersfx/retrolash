@@ -8,11 +8,14 @@ import { makeCode, normalizeCode } from "./net";
 //   /             landing page
 //   /?host=ABCD   big screen
 //   /?room=ABCD   phone
+//   /?screen=ABCD extra big screen (watches only)
 function readRoute() {
   const q = new URLSearchParams(location.search);
   const host = q.get("host");
   const room = q.get("room");
+  const screen = q.get("screen");
   if (host) return { kind: "host" as const, code: normalizeCode(host) };
+  if (screen) return { kind: "screen" as const, code: normalizeCode(screen) };
   if (room !== null) return { kind: "play" as const, code: normalizeCode(room) };
   return { kind: "home" as const, code: "" };
 }
@@ -27,6 +30,7 @@ export default function App() {
   };
 
   if (route.kind === "host" && route.code.length === 4) return <Host code={route.code} />;
+  if (route.kind === "screen" && route.code.length === 4) return <Host code={route.code} screen />;
   if (route.kind === "play") return <Play initialCode={route.code} />;
   return (
     <Home

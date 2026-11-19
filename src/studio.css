@@ -1,0 +1,144 @@
+/* v0.6: one emoji font for everyone, three-way matchups, "Neither" votes,
+   extra screens, and the "Studio" look. Loaded last.
+   The original neon look is still there as the "Party" theme: everything under
+   [data-theme="studio"] only applies to Studio. */
+
+/* ---------- emoji: the same on every device ----------
+   Noto Color Emoji comes right after the text font, so letters and digits stay
+   in Bricolage/Inter and every emoji, in any element, comes from Noto. */
+:root {
+  --display: "Bricolage Grotesque", "Noto Color Emoji", system-ui, sans-serif;
+  --body: "Inter", "Noto Color Emoji", system-ui, sans-serif;
+}
+select, option { font-family: var(--body); }
+
+/* ---------- three-way matchups ---------- */
+.versus.sides-3 { grid-template-columns: repeat(3, 1fr); gap: 2em; max-width: 92em; }
+.versus.sides-3 .answer-card { padding: 1.5em; min-height: 10em; }
+.versus.sides-3 .answer-text { font-size: 1.8em; }
+.versus.sides-3 .answer-text.emoji-answer { font-size: 2.6em; }
+.versus.sides-3 .vote-tokens .plate.landed { font-size: 1.15em; }
+.versus.sides-3 .vote-tokens.some .plate.landed { font-size: 1em; }
+.versus.sides-3 .vote-tokens.many .plate.landed { font-size: 0.85em; }
+.answer-card.side-2 { background: var(--c); color: #04302a; --dir: 1; }
+.answer-card.fly-up { animation: flyUp 0.7s cubic-bezier(.2,1.3,.4,1) 0.8s both; }
+@keyframes flyUp { from { transform: translateY(60vh) rotate(-4deg); opacity: 0; } }
+.phase-matchupResult .answer-card.fly-up { animation: none; }
+.stage.exiting .answer-card.side-2:not(.gone) { animation-delay: 0.14s; }
+/* RETROLASH with three: the winner slides to the middle. */
+.versus.sides-3.retrolash .answer-card.champion.side-0 { transform: translateX(calc(100% + 2em)) scale(1.12); }
+.versus.sides-3.retrolash .answer-card.champion.side-1 { transform: scale(1.12); }
+.versus.sides-3.retrolash .answer-card.champion.side-2 { transform: translateX(calc(-100% - 2em)) scale(1.12); }
+.skips { margin: -0.4em 0 0; font-weight: 600; }
+
+/* ---------- phone ---------- */
+.vote-btn.side-2 { background: var(--c); color: #04302a; }
+.vote.three .vote-btn { min-height: 4.8rem; padding: 1rem 1.1rem; font-size: 1.2rem; }
+.vote.three .vote-btn.emoji-answer { font-size: 2rem; }
+.neither-btn { justify-content: center; align-self: stretch; }
+.neither-btn.chosen { background: var(--panel-2); box-shadow: inset 0 0 0 2px var(--ink); }
+.not-you { align-self: center; margin-top: auto; opacity: 0.75; }
+
+/* ---------- extra screens ---------- */
+.extra-screen { display: flex; gap: 0.8em; align-items: center; flex-wrap: wrap; font-size: 0.9em; }
+.extra-screen code { background: var(--bg-2); padding: 0.3em 0.7em; border-radius: 8px; font-size: 0.95em; }
+.screen-badge { background: var(--panel); color: var(--muted); font-weight: 700; border-radius: 999px; padding: 0.4em 0.9em; }
+
+@media (max-width: 900px) {
+  .versus.sides-3 { grid-template-columns: 1fr; gap: 1em; }
+  .versus.sides-3.retrolash .answer-card.champion.side-0,
+  .versus.sides-3.retrolash .answer-card.champion.side-1,
+  .versus.sides-3.retrolash .answer-card.champion.side-2 { transform: scale(1.04); }
+}
+
+/* =====================================================================
+   Studio: the same show, dressed for a meeting room. Deep navy instead of
+   purple, warmer and slightly muted accents, soft shadows instead of the hard
+   cartoon offsets, hairline borders on panels. Motion and sound are unchanged.
+   ===================================================================== */
+[data-theme="studio"] {
+  --bg: #0f1524;
+  --bg-2: #151d30;
+  --panel: #1c263d;
+  --panel-2: #2b3756;
+  --ink: #f3f5fa;
+  --muted: #9ba8c4;
+  --a: #f6c445; /* amber */
+  --b: #f07193; /* rose */
+  --c: #3fd0b5; /* mint */
+  --d: #8f9dff; /* periwinkle */
+  --danger: #ff7a7a;
+  --radius: 20px;
+  --line: rgba(255, 255, 255, 0.07);
+  --soft: 0 10px 30px -12px rgba(0, 0, 0, 0.55);
+}
+[data-theme="studio"] body {
+  background:
+    radial-gradient(1100px 650px at 0% -10%, rgba(63, 208, 181, 0.1), transparent 60%),
+    radial-gradient(900px 600px at 105% 110%, rgba(143, 157, 255, 0.14), transparent 55%),
+    linear-gradient(180deg, #111a2c 0%, #0c1220 100%);
+  background-attachment: fixed;
+}
+
+/* Panels: hairline edge and a soft lift. */
+[data-theme="studio"] :is(.join-panel, .player-tile, .done-tile, .scoreboard li, .lash-item, .action-list li,
+  .hl-card, .mini-join, .round-pill, .settings, .fu-row, .card, .followup-item, .my-answers li, .lash-opt,
+  .mood-btn, .discuss, .audience-chip, .plan-chip, .vol-panel, .followup-preview li, .sprint-list li) {
+  border: 1px solid var(--line);
+  box-shadow: var(--soft);
+}
+[data-theme="studio"] .settings { background: rgba(21, 29, 48, 0.7); }
+[data-theme="studio"] .player-tile { box-shadow: inset 6px 0 0 var(--plate, transparent), var(--soft); }
+[data-theme="studio"] .done-tile { box-shadow: inset 5px 0 0 var(--plate, transparent), var(--soft); }
+[data-theme="studio"] .done-tile.done { border-color: var(--c); }
+[data-theme="studio"] .scoreboard li.leader { box-shadow: inset 0 0 0 2px var(--a), var(--soft); }
+[data-theme="studio"] .lash-item.top { box-shadow: inset 0 0 0 2px var(--c), var(--soft); }
+
+/* Buttons: no chunky 3D ledge, a glow instead. */
+[data-theme="studio"] .btn {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 8px 22px -10px rgba(246, 196, 69, 0.7);
+}
+[data-theme="studio"] .btn:active { transform: translateY(1px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+[data-theme="studio"] .btn.ghost { box-shadow: inset 0 0 0 1.5px var(--panel-2); }
+[data-theme="studio"] .btn.ghost:hover { box-shadow: inset 0 0 0 1.5px var(--muted); }
+[data-theme="studio"] input, [data-theme="studio"] textarea { border-width: 1.5px; }
+
+/* Name plates keep their colours, with a lighter outline. */
+[data-theme="studio"] .plate {
+  color: #0f1524; border: 2px solid rgba(15, 21, 36, 0.85);
+  box-shadow: 0 4px 14px -4px rgba(0, 0, 0, 0.5);
+}
+[data-theme="studio"] .plate-av { background: rgba(255, 255, 255, 0.6); }
+
+/* Answer cards: still bold blocks of colour, with depth instead of outlines. */
+[data-theme="studio"] .answer-card {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 24px 50px -22px rgba(0, 0, 0, 0.7);
+}
+[data-theme="studio"] .answer-card.winner {
+  box-shadow: 0 0 0 4px var(--ink), 0 28px 70px -20px rgba(0, 0, 0, 0.7);
+}
+[data-theme="studio"] .versus.retrolash .answer-card.champion {
+  box-shadow: 0 0 0 4px var(--ink), 0 0 90px 6px rgba(246, 196, 69, 0.35), 0 28px 70px -20px rgba(0, 0, 0, 0.7);
+}
+[data-theme="studio"] .vote-btn { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 10px 24px -14px rgba(0, 0, 0, 0.7); }
+[data-theme="studio"] .vote-btn.chosen { box-shadow: 0 0 0 3px var(--ink); }
+[data-theme="studio"] .vs { border: 2px solid var(--panel-2); background: var(--bg-2); box-shadow: var(--soft); }
+
+/* Big type: same fonts, calmer shadows. */
+[data-theme="studio"] .m-intro-num { text-shadow: 0 16px 40px rgba(0, 0, 0, 0.45); }
+[data-theme="studio"] .banner { text-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); }
+[data-theme="studio"] .retrolash-banner { text-shadow: 0 5px 0 rgba(0, 0, 0, 0.25), 0 14px 50px rgba(246, 196, 69, 0.45); }
+[data-theme="studio"] .callout { box-shadow: 0 14px 34px -12px rgba(0, 0, 0, 0.6); color: #2a0614; }
+[data-theme="studio"] .intro-num { letter-spacing: 0.22em; font-size: 1.6em; }
+[data-theme="studio"] .timer { border-width: 3px; box-shadow: var(--soft); }
+[data-theme="studio"] .fuse span { background: linear-gradient(90deg, var(--c), var(--d), var(--b)); }
+
+/* Odds and ends that had the old purple baked in. */
+[data-theme="studio"] .vip-bar { background: rgba(15, 21, 36, 0.92); }
+[data-theme="studio"] .kudos-card { background: #fbf7ee; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.6), inset 0 8px 0 var(--plate); }
+[data-theme="studio"] .podium-block {
+  color: rgba(15, 21, 36, 0.5);
+  background: linear-gradient(var(--plate), color-mix(in srgb, var(--plate) 55%, #0f1524));
+}
+[data-theme="studio"] .hl-card.lash { box-shadow: 0 0 0 3px var(--a), var(--soft); }
+[data-theme="studio"] .qr { box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.6); }

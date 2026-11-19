@@ -1,7 +1,7 @@
 // Quick checks for the pure helpers in shared/. Run: npx tsx scripts/selftest.ts
 import assert from "node:assert/strict";
 import { DEFAULT_SETTINGS, PACKS, emojiOnly, parsePreviousItems, places, planRounds } from "../shared/types";
-import { GameRoom, type Connection, type Room } from "../server/game";
+import { GameRoom, groupPlayers, type Connection, type Room } from "../server/game";
 import { prompts, sprintPrompts } from "../shared/prompts";
 import { titledPlan } from "../shared/i18n";
 import { mkdtempSync } from "node:fs";
@@ -140,5 +140,101 @@ assert.equal(game.state.phase, "matchupResult", "the only voter closes the vote"
 assert.deepEqual(m.points, autoSide === 0 ? [50, 0] : [0, 50], "an auto-answer earns half its vote points and no win bonus");
 assert.equal(game.hostView().matchup?.auto?.[autoSide], true, "the big screen sees which side was automatic");
 game.dispose();
+
+// Grouping: everyone gets exactly two prompts, nobody meets themselves, trios kick in for big teams.
+for (const n of [3, 4, 7, 8, 9, 10, 11, 16]) {
+  const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+  for (const trios of [false, true]) {
+    const groups = groupPlayers(ids, trios);
+    const seen = new Map<string, number>();
+    for (const g of groups) {
+      assert.equal(new Set(g).size, g.length, `n=${n}: someone is in a group twice`);
+      g.forEach((id) => seen.set(id, (seen.get(id) ?? 0) + 1));
+    }
+    assert.ok(ids.every((id) => seen.get(id) === 2), `n=${n} trios=${trios}: not two prompts each`);
+    if (!trios) assert.ok(groups.every((g) => g.length === 2) && groups.length === n);
+    else assert.ok(groups.filter((g) => g.length === 3).length >= Math.floor((2 * n - 4) / 3), `n=${n}: too few trios`);
+  }
+}
+
+// A 9-player game: three-way matchups, "neither" votes, extra screens and rejoining by name.
+{
+  const conns2: FakeConn[] = [];
+  const room2: Room = { id: "trio", storage: { get: async () => undefined, put: async () => {} }, getConnections: () => conns2 };
+  const g = new GameRoom(room2);
+  await g.onStart();
+  const join = (id: string) => {
+    const c = new FakeConn(id);
+    conns2.push(c);
+    g.onConnect(c);
+    return c;
+  };
+  const tell = (c: FakeConn, m: object) => g.onMessage(JSON.stringify(m), c);
+  const host2 = join("h");
+  tell(host2, { t: "helloHost" });
+  const screen = join("tv");
+  tell(screen, { t: "helloScreen" });
+  assert.equal(screen.sent.at(-1)?.t, "view", "an extra screen gets the big-screen view");
+  const ps = Array.from({ length: 9 }, (_, i) => {
+    const c = join(`d${i}`);
+    tell(c, { t: "helloPlayer", name: `P${i}` });
+    return c;
+  });
+  // A phone sleeps, its tab is gone; the same name on a new device id picks the player up again.
+  const gone = ps[8];
+  conns2.splice(conns2.indexOf(gone), 1);
+  g.onClose(gone);
+  assert.equal(g.player("d8")?.connected, false);
+  const back = join("d8-new-tab");
+  tell(back, { t: "helloPlayer", name: "p8" });
+  assert.equal(g.state.players.filter((p) => !p.audience).length, 9, "no duplicate player on rejoin");
+  assert.equal(g.player("d8")?.connected, true, "the old player is connected again");
+  assert.equal(g.state.aliases["d8-new-tab"], "d8");
+  ps[8] = back;
+  // A connected name is not taken over: that's a second person with the same name.
+  const twin = join("twin");
+  tell(twin, { t: "helloPlayer", name: "P1" });
+  assert.ok(g.state.players.some((p) => p.name === "P1 2"), "a connected player keeps their name");
+  tell(host2, { t: "kick", playerId: "twin" });
+
+  tell(screen, { t: "start" });
+  assert.equal(g.state.phase, "lobby", "an extra screen cannot start the game");
+  tell(host2, { t: "settings", settings: { rounds: ["warmup"] } });
+  tell(host2, { t: "start" });
+  g.advance(); // answering
+  const r = g.state.rounds[0];
+  assert.equal(r.matchups.length, 6, "9 players in trios: 6 matchups instead of 9");
+  assert.ok(r.matchups.every((m) => m.playerIds.length === 3));
+  for (const m of r.matchups)
+    m.playerIds.forEach((pid, i) => tell(ps.find((c) => g.pidOf(c) === pid)!, { t: "answer", matchupId: m.id, text: `answer ${pid} ${i}` }));
+  assert.equal(g.state.phase, "matchupIntro", "all answers in: on to the first matchup");
+  g.advance(); // voting
+  const m = r.matchups[g.state.matchupIndex];
+  const voters = ps.filter((c) => !m.playerIds.includes(g.pidOf(c)!));
+  assert.equal(voters.length, 6);
+  tell(voters[0], { t: "vote", matchupId: m.id, choice: 2 });
+  tell(voters[1], { t: "vote", matchupId: m.id, choice: 2 });
+  tell(voters[2], { t: "vote", matchupId: m.id, choice: 0 });
+  tell(voters[3], { t: "vote", matchupId: m.id, choice: 0 });
+  tell(voters[3], { t: "vote", matchupId: m.id, choice: null }); // changed their mind: neither
+  tell(voters[4], { t: "vote", matchupId: m.id, choice: 7 }); // invalid: ignored
+  assert.equal(g.state.phase, "voting");
+  const pv = g.playerView(g.pidOf(voters[3])!);
+  assert.equal(pv.vote?.skipped, true);
+  assert.equal(pv.vote?.myChoice, null);
+  assert.equal(pv.vote?.answers.length, 3, "phones get all three answers");
+  tell(voters[4], { t: "vote", matchupId: m.id, choice: null });
+  tell(voters[5], { t: "vote", matchupId: m.id, choice: 1 });
+  assert.equal(g.state.phase, "matchupResult", "a skip counts as voted");
+  assert.deepEqual(m.points, [100, 100, 300], "2 votes + win bonus for side 2, 1 vote each for the others");
+  const view = g.hostView().matchup!;
+  assert.deepEqual(view.votes, [1, 1, 2]);
+  assert.equal(view.skips, 2);
+  assert.equal(view.authorPlates?.length, 3);
+  const loser = g.playerView(m.playerIds[0]).myResult;
+  assert.ok(loser?.kind === "author" && loser.won === false && loser.votes.join() === "1,2,1", "my votes first, then the others");
+  assert.equal(screen.sent.at(-1)?.t, "view", "the extra screen follows along");
+  g.dispose();
+}
 
 console.log("selftest OK");

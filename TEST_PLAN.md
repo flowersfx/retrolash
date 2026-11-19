@@ -165,9 +165,24 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 11.6 | After the last round | *Best of the retro*: up to three answers fly in one by one, clean sweeps marked RETROLASH, authors shown unless Anonymous mode |
 | 11.7 | After a finished game, download `usage.jsonl` (infra README) and run `node scripts/usage.mjs usage.jsonl` | The game is counted; the file has no names or answers |
 
+## 12. v0.6
+
+| # | Step | Expected |
+|---|------|----------|
+| 12.1 | Join on a phone, lock it for 2+ minutes in the lobby, unlock | The phone shows *reconnecting…* for at most a few seconds, then the same player. The big screen shows no "Name 2" |
+| 12.2 | Join, close the tab (or swipe the browser away), scan the QR code again | Back in as the same player straight away, no join form |
+| 12.3 | Join in Safari, then open the link in Chrome on the same phone and type the same name | The same player is picked up once the Safari one has dropped (about 20 s); no duplicate |
+| 12.4 | In the lobby on a phone, tap *Not you? Join as someone else* | Join form; joining with a new name adds a new player |
+| 12.5 | Vote, then tap **🤷 Neither** | *Skipped ✓*; you count as voted; after the reveal the big screen says how many liked neither |
+| 12.6 | Play with 8+ people (or `node scripts/bots.mjs ABCD 9`) | Head-to-head rounds have mostly three cards; phones show three answers plus Neither; a clean sweep knocks two cards out and centres the winner |
+| 12.7 | Open `/?screen=ABCD` on a second laptop (or next to a Teams call) | Same screens as the main one, with sound after a click; no buttons; keyboard does nothing; reactions float up |
+| 12.8 | Main screen with speech on | Welcome line before round 1, "Phones out!" when writing starts, a nudge on the first vote of each round, a reaction to each result as it lands, "Good work" on the scoreboard, a wrap-up line on the summary |
+| 12.9 | Switch *Studio* / *Party* in the lobby | Big screen and phones change look together; readable from the back of the room in both |
+| 12.10 | Open the game on an older Windows 10 PC and an Android phone | Avatars, moods and reactions show the same colour emoji everywhere (no empty boxes or black-and-white symbols) |
+
 ## Known gaps to check while testing
 
-- Phone identity is per browser tab (sessionStorage). Closing the tab means rejoining as someone new (5.4).
+- A phone that rejoins from a *different browser* with the same name can only take over once the old connection is gone (up to ~20 s after the phone slept). Until then it gets "Name 2"; remove the stale one in the lobby.
 
 ## Data note
 

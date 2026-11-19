@@ -5,13 +5,17 @@
 // The game runs in Swedish with the Sailboat pack, so translations and packs are exercised.
 // Speech runs against a fake backend (TTS_FAKE=1): intros must carry clips the server serves.
 //
-//   npm run build && node scripts/e2e.mjs [en|sv]
+// With 8+ players (`node scripts/e2e.mjs en 9`) the head-to-head rounds are three-way matchups.
+// An extra big screen (helloScreen) watches the whole game.
+//
+//   npm run build && node scripts/e2e.mjs [en|sv] [players]
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 const LANG = process.argv[2] ?? "sv";
+const PLAYERS = Number(process.argv[3] ?? 4);
 const PORT = 2990 + Math.floor(Math.random() * 9);
 const CODE = "ZQXE";
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), "retrolash-e2e-"));
@@ -26,7 +30,7 @@ const server = spawn(process.execPath, ["dist-server/main.js"], {
   stdio: ["ignore", "ignore", "inherit"],
 });
 const bots = () =>
-  spawn(process.execPath, ["scripts/bots.mjs", CODE, "4", `localhost:${PORT}`, "1"], { stdio: "ignore" });
+  spawn(process.execPath, ["scripts/bots.mjs", CODE, String(PLAYERS), `localhost:${PORT}`, "1"], { stdio: "ignore" });
 let botProc;
 const cleanup = () => {
   botProc?.kill();
@@ -58,6 +62,19 @@ vip.onmessage = (e) => {
   }
 };
 
+// An extra big screen in "another room": sees the show and the reactions, controls nothing.
+const tv = { views: 0, reactions: 0, phases: new Set() };
+const screen = new WebSocket(url("extra-screen"));
+screen.onopen = () => screen.send(JSON.stringify({ t: "helloScreen" }));
+screen.onmessage = (e) => {
+  const msg = JSON.parse(e.data);
+  if (msg.t === "reaction") tv.reactions++;
+  if (msg.t === "view") {
+    tv.views++;
+    tv.phases.add(msg.view.phase);
+  }
+};
+
 const ws = new WebSocket(url("host"));
 const send = (m) => ws.send(JSON.stringify(m));
 ws.onopen = () => {
@@ -79,6 +96,7 @@ let last = "";
 let lashTitle = "";
 const spokenPhases = new Set();
 let clipUrl = null;
+let maxSides = 0;
 ws.onmessage = (e) => {
   const msg = JSON.parse(e.data);
   if (msg.t === "hostToken") hostToken = msg.token;
@@ -95,7 +113,7 @@ ws.onmessage = (e) => {
     const audience = v.players.filter((p) => p.audience && p.connected);
     const vipPlayer = audience.find((p) => p.name === "VIP");
     if (vipPlayer && !vipPlayer.vip) send({ t: "vip", playerId: vipPlayer.id, on: true });
-    if (players === 4 && audience.length === 2 && vipPlayer?.vip) {
+    if (players === PLAYERS && audience.length === 2 && vipPlayer?.vip) {
       started = true;
       console.log("plan:", v.plan.map((r) => r.title).join(" → "));
       // The VIP starts the game from their phone.
@@ -106,6 +124,7 @@ ws.onmessage = (e) => {
     spokenPhases.add(v.phase);
     clipUrl ??= v.say[0].url;
   }
+  if (v.matchup) maxSides = Math.max(maxSides, v.matchup.answers.length);
   if (v.phase === "lashResult") lashTitle = v.roundTitle;
   if (v.phase === "summary") void check(v);
 };
@@ -122,11 +141,15 @@ async function check(v) {
   if (LANG === "sv" && !v.summary.some((r) => r.title.startsWith("Sprinten · del"))) fail("Swedish round titles missing");
   if (LANG === "sv" && !lashTitle.includes("Åtgärder")) fail(`Swedish Last Lash title missing: ${lashTitle}`);
   const mood = v.summary.find((r) => r.kind === "checkin").moodCounts;
-  if (mood.reduce((a, b) => a + b, 0) !== 4) fail(`expected 4 moods (audience excluded), got ${mood}`);
+  if (mood.reduce((a, b) => a + b, 0) !== PLAYERS) fail(`expected ${PLAYERS} moods (audience excluded), got ${mood}`);
   const fu = v.summary.find((r) => r.kind === "followup").followupItems;
-  if (fu.length !== 2 || fu.some((f) => f.counts.reduce((a, b) => a + b, 0) !== 4)) fail(`follow-up tallies wrong: ${JSON.stringify(fu)}`);
+  if (fu.length !== 2 || fu.some((f) => f.counts.reduce((a, b) => a + b, 0) !== PLAYERS)) fail(`follow-up tallies wrong: ${JSON.stringify(fu)}`);
   const kudos = v.summary.find((r) => r.kind === "kudos").kudos;
-  if (kudos.length !== 4) fail(`expected 4 kudos, got ${kudos.length}`);
+  if (kudos.length !== PLAYERS) fail(`expected ${PLAYERS} kudos, got ${kudos.length}`);
+  const expectSides = PLAYERS >= 8 ? 3 : 2;
+  if (maxSides !== expectSides) fail(`expected matchups of up to ${expectSides} answers, saw ${maxSides}`);
+  const sprintMatchups = v.summary.filter((r) => r.kind === "retro").flatMap((r) => r.matchups);
+  if (PLAYERS >= 8 && !sprintMatchups.some((m) => m.answers.length === 3 && m.voters?.length === 3)) fail("no three-way Sprint matchup in the summary");
   const emoji = v.summary.find((r) => r.kind === "emoji").matchups;
   if (emoji.some((m) => m.answers.some((a) => /[a-z]/i.test(a)))) fail("emoji round contains letters");
   const all = v.summary.flatMap((r) => r.matchups);
@@ -137,7 +160,9 @@ async function check(v) {
   console.log(`owners: ${owners.map((o) => o.name).join(", ") || "(none volunteered)"}`);
   if (v.players.some((p) => p.audience && p.score !== 0)) fail("audience scored points");
   if (v.players.some((p) => !p.color)) fail("a player has no plate colour");
-  for (const p of ["roundIntro", "matchupIntro"]) if (!spokenPhases.has(p)) fail(`no spoken clip during ${p}`);
+  // Prompts and round titles, plus the host's stock lines between them.
+  for (const p of ["roundIntro", "matchupIntro", "answering", "matchupResult", "summary"])
+    if (!spokenPhases.has(p)) fail(`no spoken clip during ${p}`);
   const base = `http://localhost:${PORT}`;
   const clip = await fetch(base + clipUrl);
   if (clip.status !== 200 || clip.headers.get("content-type") !== "audio/mpeg") fail(`clip ${clipUrl} not served: ${clip.status}`);
@@ -165,10 +190,13 @@ async function check(v) {
   await new Promise((r) => setTimeout(r, 300));
   const usage = readFileSync(path.join(DATA_DIR, "usage.jsonl"), "utf8");
   const games = usage.trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.event === "game");
-  if (games.length !== 1 || games[0].players !== 4) fail(`usage file wrong: ${usage}`);
+  if (games.length !== 1 || games[0].players !== PLAYERS) fail(`usage file wrong: ${usage}`);
+  if (!tv.phases.has("summary") || !tv.phases.has("matchupResult")) fail(`the extra screen missed screens: ${[...tv.phases]}`);
+  if (tv.reactions === 0) fail("the extra screen got no reactions");
+  console.log(`extra screen: ${tv.views} views, ${tv.reactions} reactions`);
   if (/Ada|Linus|Grace|PO 1/.test(usage)) fail("usage file contains names");
   console.log(`usage: ${JSON.stringify(games[0])}`);
-  console.log(`\nE2E OK (${LANG}) in ${((Date.now() - t0) / 1000).toFixed(1)}s: ${phases.length} screens, ${vipPresses} VIP press, ${sprints} Sprint rounds, ${kudos.length} kudos`);
+  console.log(`\nE2E OK (${LANG}, ${PLAYERS} players, up to ${maxSides} answers per matchup) in ${((Date.now() - t0) / 1000).toFixed(1)}s: ${phases.length} screens, ${vipPresses} VIP press, ${sprints} Sprint rounds, ${kudos.length} kudos`);
   process.exit(0);
 }
 

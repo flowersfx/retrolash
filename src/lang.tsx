@@ -1,8 +1,8 @@
 // Client-side language context, plus labels shared by the big screen and VIP phones.
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect } from "react";
 import { strings, type Strings } from "../shared/i18n";
 import { prompts, type PromptSet } from "../shared/prompts";
-import type { Lang, Phase } from "../shared/types";
+import { DEFAULT_SETTINGS, type Lang, type Phase, type ThemeId } from "../shared/types";
 
 export const LangContext = createContext<Lang>("en");
 export const useT = (): Strings => strings(useContext(LangContext));
@@ -46,6 +46,15 @@ export function nextLabel(
     default:
       return t.next.next;
   }
+}
+
+/** Put the room's look on the page (CSS keys off html[data-theme]). */
+export function useTheme(theme: ThemeId | undefined) {
+  useEffect(() => {
+    const t = theme ?? DEFAULT_SETTINGS.theme;
+    document.documentElement.dataset.theme = t;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", t === "party" ? "#1a1033" : "#0f1524");
+  }, [theme]);
 }
 
 export const REDUCED_MOTION =

@@ -29,23 +29,56 @@ export function normalizeCode(s: string) {
   return s.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4);
 }
 
-/** Stable per-tab device id, so a reload rejoins as the same player. */
+/** Who this browser last was in a room, so a new tab (or a phone that dropped the tab) picks up where it left off. */
+export type LastIdentity = { id: string; name: string; audience: boolean; avatar?: string; at: number };
+export const REJOIN_MAX_AGE = 12 * 3600 * 1000;
+const lastKey = (code: string) => `retrolash:last:${code}`;
+
+export function lastIdentity(code: string): LastIdentity | null {
+  try {
+    const raw = localStorage.getItem(lastKey(code));
+    const last = raw ? (JSON.parse(raw) as LastIdentity) : null;
+    return last && typeof last.id === "string" && Date.now() - last.at < REJOIN_MAX_AGE ? last : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setLastIdentity(code: string, last: LastIdentity | null) {
+  try {
+    if (last) localStorage.setItem(lastKey(code), JSON.stringify(last));
+    else localStorage.removeItem(lastKey(code));
+  } catch {
+    /* private mode */
+  }
+}
+
+/** One fallback id per page load when storage is blocked, so reconnects keep the same identity. */
+let memoryId: string | null = null;
+
+/**
+ * Stable device id, so a reload rejoins as the same player. Per tab (so one
+ * browser can test several players), falling back to the last identity in this
+ * room when the tab is new: mobile browsers often throw away a sleeping tab.
+ */
 export function deviceId(code: string) {
   const key = `retrolash:id:${code}`;
   try {
     let id = sessionStorage.getItem(key);
     if (!id) {
-      id = crypto.randomUUID();
+      id = lastIdentity(code)?.id ?? crypto.randomUUID();
       sessionStorage.setItem(key, id);
     }
     return id;
   } catch {
-    return crypto.randomUUID();
+    memoryId ??= lastIdentity(code)?.id ?? crypto.randomUUID();
+    return memoryId;
   }
 }
 
 /** Reuse an earlier id in this tab ("Continue as …" after the tab was closed). */
 export function setDeviceId(code: string, id: string) {
+  memoryId = id;
   try {
     sessionStorage.setItem(`retrolash:id:${code}`, id);
   } catch {
@@ -104,10 +137,30 @@ export function useRoom<V extends View>(
     ws.addEventListener("open", onOpen);
     ws.addEventListener("close", onClose);
     ws.addEventListener("message", onMessage);
+
+    // A phone that slept often keeps a socket that looks open but is dead, and the
+    // reconnect backoff may be long by then. Coming back to the page reconnects now.
+    let hiddenAt = 0;
+    const wake = () => {
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+        return;
+      }
+      const away = hiddenAt ? Date.now() - hiddenAt : 0;
+      if (ws.readyState !== WebSocket.OPEN || away > 15_000) ws.reconnect();
+    };
+    const onPageShow = (e: PageTransitionEvent) => e.persisted && ws.reconnect();
+    const onOnline = () => ws.readyState !== WebSocket.OPEN && ws.reconnect();
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("online", onOnline);
     return () => {
       ws.removeEventListener("open", onOpen);
       ws.removeEventListener("close", onClose);
       ws.removeEventListener("message", onMessage);
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("online", onOnline);
       ws.close();
       socketRef.current = null;
     };
@@ -135,4 +188,9 @@ export function useCountdown(remainingMs: number | null | undefined, receivedAt:
 
 export function joinUrl(code: string) {
   return `${location.origin}${location.pathname}?room=${code}`;
+}
+
+/** An extra big screen for the same game (another room, or someone remote). */
+export function screenUrl(code: string) {
+  return `${location.origin}${location.pathname}?screen=${code}`;
 }

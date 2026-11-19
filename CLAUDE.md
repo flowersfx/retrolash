@@ -22,7 +22,12 @@ Quiplash-style party game for Scrum retrospectives. The big meeting-room screen 
 - Language (`settings.lang`, en/sv) drives big screen, phones, prompts, server error messages and the Markdown export; `parsePreviousItems` reads both languages.
 - Anonymity works like Quiplash by default: answers are anonymous during voting, then authors and voters are revealed. An optional "Anonymous mode" toggle hides authors, voters and scores entirely.
 - Summary exports Markdown (copy / download) so outcomes can go to Jira/Confluence/Slack.
-- Min 3 players, max 16. Each player gets 2 prompts per head-to-head round (circular pairing).
+- Min 3 players, max 16. Each player gets 2 prompts per head-to-head round (circular pairing). With 8+ players (`TRIO_MIN_PLAYERS`, setting `trios`, on by default) matchups are three-way: `groupPlayers` in `server/game.ts` makes groups of three plus a pair or two, everyone still in exactly two. Matchups are N-sided arrays everywhere (`tally`/`winnerOf` in `shared/types.ts`).
+- Voters can pick "Neither" (`vote` with `choice: null`): stored in `matchup.skips`, counts as done, scores nobody.
+- **Extra screens:** `/?screen=ABCD` sends `helloScreen` and gets the host view and reactions, but no control. For hybrid/Teams use (`docs/TEAMS.md`).
+- **Rejoin:** phones fall back to the last identity in localStorage when the tab is new (sleeping phones lose tabs), reconnect on `visibilitychange`/`pageshow`, and the server lets a new device take over an *offline* player with the same name and role (`state.aliases`: device id → player id; connection state carries `pid`). Heartbeat is 10 s so dead sockets drop fast.
+- **Host chatter:** stock spoken lines (`spoken.welcome/write/vote/result/roundDone/poll/lashVote/lashResult/wrap` in i18n) are `optional` speech lines: generated at server start (`warmSpeech`), skipped if not ready. Result reactions are timed with `revealTiming()`, shared with the big screen.
+- **Themes:** `settings.theme` "studio" (default) or "party"; `html[data-theme]`, overrides in `src/studio.css`. Emoji come from Noto Color Emoji (Google Fonts), placed right after the text fonts in `--display`/`--body`.
 - The server sends each connection a tailored view (`HostView` / `PlayerView`); never broadcast secret state.
 - **Host token:** the first `helloHost` of a room gets `{t:"hostToken"}` (48 hex chars, stored in that browser's localStorage); only its SHA-256 is saved in the game state. Later big screens must present it or get an error. Survives restart. `useRoom` accepts a hello *function* so reconnects send the stored token.
 - Missed answers: when exactly one side of a matchup is empty at time-up, `fillMissing` puts a 🆘 quip there (`auto` flag): half vote points, no win bonus, no streak, excluded from highlights. Both empty → matchup skipped.
@@ -49,7 +54,8 @@ Quiplash-style party game for Scrum retrospectives. The big meeting-room screen 
 - v0.5 (built and deployed 2026-11-11 as image `45cb243`, revision `retrolash--0000005`): host token, auto-answers, shared places, cheerful English voice + spoken round lines + winner announcement, highlights reel, usage file. Live smoke test on retrolash.flowersfx.com: token refusal, highlights, timed podium lines all worked; not yet tested with humans. Test plan section 11.
 - Rollouts: for a minute or two the old revision keeps serving, then its sockets close (state is saved first). Real clients reconnect and the game resumes on the new code (seen live: a v0.4 game finished on v0.5). Still, roll out between retros.
 - Display font (Bricolage Grotesque via Google Fonts) hasn't been seen rendered yet.
+- 2026-11-19: tested by 11 humans, ran fine. Feedback led to v0.6 (built 2026-11-19, not deployed yet): emoji web font, sturdier rejoin, host chatter lines, "Neither" vote, three-way matchups for 8+ players, extra screens (`?screen=`), Studio theme. Teams proposal in `docs/TEAMS.md`. Verified: selftest, e2e sv/en with 4 players and en with 9 (trios, extra screen, chatter), plus a local bot game in the browser. Test plan section 12.
 
 ## Ideas not yet built
-- Fewer prompts per player for big teams (>8) to keep voting rounds short
+- Teams meeting app (stage = `?screen=`, side panel = phone UI); needs `frame-ancestors` for Teams and tenant admin approval. See `docs/TEAMS.md`
 - Previous retro's action items carried over automatically (today: paste last Markdown export into the lobby)

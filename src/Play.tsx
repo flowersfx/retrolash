@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { deviceId, normalizeCode, setDeviceId, useCountdown, useRoom } from "./net";
+import {
+  deviceId,
+  lastIdentity,
+  normalizeCode,
+  setDeviceId,
+  setLastIdentity,
+  useCountdown,
+  useRoom,
+  type LastIdentity,
+} from "./net";
 import { strings } from "../shared/i18n";
-import { LangContext, deviceLang, nextLabel, usePrompts, useT } from "./lang";
+import { LangContext, deviceLang, nextLabel, usePrompts, useT, useTheme } from "./lang";
 import {
   AUDIENCE_AVATARS,
   AVATARS,
@@ -22,12 +31,8 @@ import {
 
 const NAME_KEY = "retrolash:name";
 const LOOK_KEY = "retrolash:look";
-/** Last identity per room, so closing the tab doesn't make you someone new. */
-const lastKey = (code: string) => `retrolash:last:${code}`;
-const REJOIN_MAX_AGE = 12 * 3600 * 1000;
 type Send = (m: ClientMessage) => void;
 type Look = { avatar: string; color: string };
-type LastIdentity = { id: string; name: string; audience: boolean; avatar?: string; at: number };
 
 function readStore<T>(store: "local" | "session", key: string): T | null {
   try {
@@ -57,13 +62,28 @@ function defaultLook(): Look {
   );
 }
 
+/**
+ * Who to rejoin as without asking: this tab's own session, or else the last
+ * identity this browser had in the room (a phone that slept and lost the tab,
+ * a re-scanned QR code). ?room=ABCD&new skips it, to add another player from
+ * the same browser.
+ */
+function resumable(code: string): { name: string; audience: boolean } | null {
+  const session = readStore<string>("session", joinedKey(code));
+  const name = readStore<string>("local", NAME_KEY) ?? "";
+  if (session !== null) return { name: lastIdentity(code)?.name ?? name, audience: session === "audience" };
+  if (new URLSearchParams(location.search).has("new")) return null;
+  const last = code.length === 4 ? lastIdentity(code) : null;
+  return last ? { name: last.name, audience: last.audience } : null;
+}
+
 export default function Play({ initialCode }: { initialCode: string }) {
+  const [resume] = useState(() => resumable(initialCode));
   const [code, setCode] = useState(initialCode);
-  const [name, setName] = useState(() => readStore<string>("local", NAME_KEY) ?? "");
+  const [name, setName] = useState(() => resume?.name ?? readStore<string>("local", NAME_KEY) ?? "");
   const [look, setLook] = useState<Look>(defaultLook);
-  // Rejoin automatically after a reload in the same tab.
-  const [joined, setJoined] = useState(() => readStore<string>("session", joinedKey(initialCode)) !== null);
-  const [audience, setAudience] = useState(() => readStore<string>("session", joinedKey(initialCode)) === "audience");
+  const [joined, setJoined] = useState(!!resume);
+  const [audience, setAudience] = useState(!!resume?.audience);
 
   const hello = useMemo<ClientMessage | null>(
     () => (joined ? { t: "helloPlayer", name, audience, avatar: look.avatar, color: look.color } : null),
@@ -72,26 +92,33 @@ export default function Play({ initialCode }: { initialCode: string }) {
   );
   const { view, receivedAt, error, connected, send } = useRoom<PlayerView>(joined ? code : null, hello);
   const lang = view?.lang ?? deviceLang();
+  useTheme(view?.theme);
+
+  const forget = () => {
+    setJoined(false);
+    writeStore("session", joinedKey(code), null);
+    setLastIdentity(code, null);
+    setDeviceId(code, crypto.randomUUID());
+  };
 
   // Server errors only happen on a failed join or a kick: back to the form.
   useEffect(() => {
-    if (!error) return;
-    setJoined(false);
-    writeStore("session", joinedKey(code), null);
-    writeStore("local", lastKey(code), null);
+    if (error) forget();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error, code]);
 
-  // Remember who we are in this room, for "Continue as …" in a new tab.
+  // Remember who we are in this room, so a new tab picks up the same player.
   useEffect(() => {
     if (!view?.you) return;
-    writeStore("local", lastKey(code), {
+    writeStore("session", joinedKey(code), view.you.audience ? "audience" : "player");
+    setLastIdentity(code, {
       id: deviceId(code),
       name: view.you.name,
       audience: !!view.you.audience,
       avatar: view.you.avatar,
       at: Date.now(),
-    } satisfies LastIdentity);
-  }, [view?.you?.name, view?.you?.avatar, code]); // eslint-disable-line react-hooks/exhaustive-deps
+    });
+  }, [view?.you?.name, view?.you?.avatar, view?.phase, code]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A little buzz when there's something to do (Android; iOS ignores it).
   const key = view ? phaseKey(view) : "";
@@ -104,12 +131,16 @@ export default function Play({ initialCode }: { initialCode: string }) {
 
   const join = (asAudience: boolean, reuse?: LastIdentity) => {
     if (code.length !== 4 || !(reuse || name.trim())) return;
+    const last = lastIdentity(code);
     if (reuse) {
       setDeviceId(code, reuse.id);
       setName(reuse.name);
     } else {
       writeStore("local", NAME_KEY, name.trim());
       writeStore("local", LOOK_KEY, look);
+      // Typing your own name again is "continue"; a different name is someone new.
+      const same = last && last.name.toLowerCase() === name.trim().toLowerCase() && last.audience === asAudience;
+      setDeviceId(code, same ? last.id : crypto.randomUUID());
     }
     writeStore("session", joinedKey(code), asAudience ? "audience" : "player");
     history.replaceState(null, "", `?room=${code}`);
@@ -140,6 +171,11 @@ export default function Play({ initialCode }: { initialCode: string }) {
       <main className={`phone ${vip ? "has-vip" : ""}`}>
         <PhoneHeader view={view} receivedAt={receivedAt} connected={connected} />
         {!view ? <Waiting title={strings(lang).phone.connecting} /> : <PhoneStage key={phaseKey(view)} view={view} send={send} />}
+        {view?.phase === "lobby" && (
+          <button className="btn ghost small not-you" onClick={forget}>
+            {strings(lang).phone.notYou}
+          </button>
+        )}
         {view && vip && <VipBar view={view} send={send} />}
       </main>
     </LangContext.Provider>
@@ -167,8 +203,8 @@ function JoinForm({
 }) {
   const t = useT();
   const ready = code.length === 4 && !!name.trim();
-  const last = code.length === 4 ? readStore<LastIdentity>("local", lastKey(code)) : null;
-  const canRejoin = !!last && Date.now() - last.at < REJOIN_MAX_AGE;
+  const last = code.length === 4 ? lastIdentity(code) : null;
+  const canRejoin = !!last;
   return (
     <main className="phone">
       <h1 className="logo">
@@ -478,7 +514,7 @@ function MyResultCard({ view, send }: { view: PlayerView; send: Send }) {
   return (
     <div className={`my-result ${mood} ${r.unanimous ? "lash" : ""}`}>
       <h2>{title}</h2>
-      <div className="big-score">{t.phone.score(r.votes[0], r.votes[1])}</div>
+      <div className="big-score">{t.phone.score(r.votes)}</div>
       {r.points !== null && r.points > 0 && <p className="pts">{t.phone.points(r.points)}</p>}
       {r.auto && <p className="muted">{t.phone.autoAnswered}</p>}
       <Reactions send={send} />
@@ -727,24 +763,31 @@ function Vote({ view, send }: { view: PlayerView; send: Send }) {
   const t = useT();
   const v = view.vote!;
   if (!v.canVote) return <Waiting title={t.phone.yours} sub={t.phone.yoursSub} send={send} />;
+  const decided = v.myChoice !== null || v.skipped;
   return (
-    <div className="vote">
+    <div className={`vote ${v.answers.length > 2 ? "three" : ""}`}>
       <h2 className="phone-prompt">{v.prompt}</h2>
       {v.answers.map((a, i) => (
         <button
           key={i}
           className={`vote-btn side-${i} ${v.myChoice === i ? "chosen" : ""} ${
-            v.myChoice !== null && v.myChoice !== i ? "faded" : ""
+            decided && v.myChoice !== i ? "faded" : ""
           } ${view.roundKind === "emoji" ? "emoji-answer" : ""}`}
           disabled={!a}
-          onClick={() => send({ t: "vote", matchupId: v.matchupId, choice: i as 0 | 1 })}
+          onClick={() => send({ t: "vote", matchupId: v.matchupId, choice: i })}
         >
           {a || "🦗"}
         </button>
       ))}
-      {v.myChoice !== null && (
+      <button
+        className={`btn ghost neither-btn ${v.skipped ? "chosen" : ""}`}
+        onClick={() => send({ t: "vote", matchupId: v.matchupId, choice: null })}
+      >
+        {t.phone.neither}
+      </button>
+      {decided && (
         <>
-          <p className="muted center-text">{t.phone.voted}</p>
+          <p className="muted center-text">{v.skipped ? t.phone.skipped : t.phone.voted}</p>
           <Reactions send={send} />
         </>
       )}

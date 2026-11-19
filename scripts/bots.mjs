@@ -11,7 +11,7 @@ const host = hostArg.replace(/^[a-z]+:\/\//i, "").replace(/\/+$/, "");
 // Plain ws for local/LAN dev servers, TLS for anything deployed.
 const isLocal = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
 const scheme = isLocal ? "ws" : "wss";
-const NAMES = ["Ada", "Linus", "Grace", "Ken", "Barbara", "Dennis", "Margaret", "Alan"];
+const NAMES = ["Ada", "Linus", "Grace", "Ken", "Barbara", "Dennis", "Margaret", "Alan", "Frances", "Edsger", "Radia", "Tim"];
 const QUIPS = [
   "Blame the intern", "It was DNS", "More meetings", "A very large spreadsheet",
   "Coffee, mostly", "Rewrite it in Rust", "Nobody read the ticket", "Works on my machine",
@@ -20,7 +20,7 @@ const QUIPS = [
 const EMOJI = ["🔥🐶☕", "🤡🎪", "🙈🙉🙊", "📉😬", "🐌⏳", "🚀💥", "🧯🔥"];
 const REACTIONS = ["😂", "🔥", "👏", "😮"];
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
-const AVATARS = ["🦊", "🐙", "🦉", "🐸", "🦄", "🐝", "🐳", "🦖"];
+const AVATARS = ["🦊", "🐙", "🦉", "🐸", "🦄", "🐝", "🐳", "🦖", "🐧", "🦔", "🐢", "🦩"];
 const COLORS = ["#ffcf33", "#ff5ca8", "#3ee0c5", "#7c8cff", "#ff8a3d", "#9be15d", "#c77dff", "#4cc9f0"];
 const KUDOS = ["Thanks for the code reviews", "Saved the demo", "Best rubber duck", "Kept us calm"];
 const delay = () => 300 + Math.random() * 1500;
@@ -63,10 +63,15 @@ function bot(i, audience) {
         const to = Math.random() < 0.2 ? "team" : pick(v.kudosForm.teammates).id;
         once(`k:${round}`, () => send({ t: "kudos", to, text: pick(KUDOS) }));
       }
-      if (v.phase === "voting" && v.vote?.canVote && v.vote.myChoice === null)
-        once(`v:${v.vote.matchupId}`, () =>
-          send({ t: "vote", matchupId: v.vote.matchupId, choice: process.env.BOT_VOTE ? Number(process.env.BOT_VOTE) : Math.random() < 0.5 ? 0 : 1 }),
-        );
+      if (v.phase === "voting" && v.vote?.canVote && v.vote.myChoice === null && !v.vote.skipped) {
+        // Two or three answers; now and then a bot likes neither.
+        const choice = process.env.BOT_VOTE
+          ? Number(process.env.BOT_VOTE)
+          : Math.random() < 0.08
+            ? null
+            : Math.floor(Math.random() * v.vote.answers.length);
+        once(`v:${v.vote.matchupId}`, () => send({ t: "vote", matchupId: v.vote.matchupId, choice }));
+      }
       if (v.phase === "lashVoting" && v.lashBallot && !v.lashBallot.submitted) {
         const options = v.lashBallot.answers.filter((a) => !a.mine).map((a) => a.id);
         const ids = options.sort(() => Math.random() - 0.5).slice(0, v.lashBallot.votesAllowed);

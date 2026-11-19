@@ -49,7 +49,17 @@ export interface Settings {
   pack: PackId;
   /** Read round titles and prompts aloud on the big screen (when the server has speech). */
   speech: boolean;
+  /** With TRIO_MIN_PLAYERS or more, matchups are three answers at once (shorter rounds). */
+  trios: boolean;
+  /** Look of the big screen and phones. */
+  theme: ThemeId;
 }
+
+/** "studio": calmer colours for meeting rooms. "party": the original neon look. */
+export type ThemeId = "studio" | "party";
+export const THEMES: ThemeId[] = ["studio", "party"];
+/** From this many players, head-to-head rounds use three-way matchups (when Settings.trios is on). */
+export const TRIO_MIN_PLAYERS = 8;
 
 export const DEFAULT_LASH_PROMPT: Record<Lang, string> = {
   en: "One concrete thing we should change next sprint",
@@ -71,6 +81,8 @@ export const DEFAULT_SETTINGS: Settings = {
   lang: "en",
   pack: "mix",
   speech: true,
+  trios: true,
+  theme: "studio",
 };
 
 /** How many Sprint rounds "auto" gives: at least two, three for tiny teams. */
@@ -152,22 +164,25 @@ export type Callout =
 export interface MatchupView {
   id: string;
   prompt: string;
-  answers: [string, string];
+  /** Two answers (head-to-head), or three in a three-way matchup. */
+  answers: string[];
   /** Only revealed in non-anonymous mode, after voting. */
-  authors?: [string, string];
+  authors?: string[];
   /** Authors' plates, only in non-anonymous mode after voting. */
-  authorPlates?: [VoterView | null, VoterView | null];
-  /** Vote counts, only after voting closes. */
-  votes?: [number, number];
+  authorPlates?: (VoterView | null)[];
+  /** Vote counts per side, only after voting closes. */
+  votes?: number[];
   /** Who voted for each side (names), only in non-anonymous mode after voting. */
-  voterNames?: [string[], string[]];
+  voterNames?: string[][];
   /** Voters' plates per side, only in non-anonymous mode after voting. */
-  voters?: [VoterView[], VoterView[]];
+  voters?: VoterView[][];
   /** Points awarded per side, only in non-anonymous mode. */
-  points?: [number, number];
+  points?: number[];
   unanimous?: boolean;
   /** Sides answered automatically after the timer ran out (shown after the vote). */
-  auto?: [boolean, boolean];
+  auto?: boolean[];
+  /** How many people voted "neither". */
+  skips?: number;
   /** A streak or comeback worth shouting about (non-anonymous only). */
   callout?: Callout;
 }
@@ -290,6 +305,27 @@ export interface HighlightView {
 export const PODIUM_REVEAL = { intro: 3300, first: 5100 } as const;
 export const HIGHLIGHT_STEP_MS = 3200;
 
+/** Matchup reveal: when each of n vote plates lands, and when the result shows (ms after the screen appears). */
+export function revealTiming(n: number) {
+  const step = Math.max(170, Math.min(420, 4200 / Math.max(1, n)));
+  const start = 900;
+  return { start, step, result: start + n * step + 400 };
+}
+
+/** Vote counts per side. */
+export function tally(votes: Record<string, number>, sides: number): number[] {
+  const counts = Array.from({ length: sides }, () => 0);
+  for (const v of Object.values(votes)) if (v >= 0 && v < sides) counts[v]++;
+  return counts;
+}
+
+/** The side with strictly the most votes, or null for a tie at the top. */
+export function winnerOf(counts: number[]): number | null {
+  const best = Math.max(...counts);
+  const top = counts.filter((c) => c === best).length;
+  return top === 1 ? counts.indexOf(best) : null;
+}
+
 /** Competition ranking (1, 2, 2, 4): equal scores share a place. */
 export function places(scores: number[]): number[] {
   return scores.map((s) => 1 + scores.filter((x) => x > s).length);
@@ -308,8 +344,8 @@ export type MyResult =
       /** null = tie */
       won: boolean | null;
       unanimous: boolean;
-      /** My votes, their votes. */
-      votes: [number, number];
+      /** My votes first, then the other sides' (most first). */
+      votes: number[];
       /** null in anonymous mode. */
       points: number | null;
       /** The timer ran out and the game answered for me. */
@@ -351,9 +387,11 @@ export interface PlayerView {
   vote?: {
     matchupId: string;
     prompt: string;
-    answers: [string, string];
+    answers: string[];
     canVote: boolean;
-    myChoice: 0 | 1 | null;
+    myChoice: number | null;
+    /** Voted "neither". */
+    skipped: boolean;
   };
   /** matchupResult: how it went for me. */
   myResult?: MyResult;
@@ -380,6 +418,7 @@ export interface PlayerView {
   };
   playerCount: number;
   minPlayers: number;
+  theme: ThemeId;
 }
 
 export type ServerMessage =
@@ -392,6 +431,8 @@ export type ServerMessage =
 
 export type ClientMessage =
   | { t: "helloHost"; token?: string }
+  /** An extra big screen (another room, or a remote viewer): shows the show, controls nothing. */
+  | { t: "helloScreen" }
   | { t: "helloPlayer"; name: string; audience?: boolean; avatar?: string; color?: string }
   | { t: "profile"; avatar: string; color: string }
   | { t: "settings"; settings: Partial<Settings> }
@@ -403,7 +444,8 @@ export type ClientMessage =
   | { t: "restart" }
   | { t: "answer"; matchupId: string; text: string }
   | { t: "lashAnswers"; texts: string[] }
-  | { t: "vote"; matchupId: string; choice: 0 | 1 }
+  /** choice null = "neither": counts as voted, scores nobody. */
+  | { t: "vote"; matchupId: string; choice: number | null }
   | { t: "lashVote"; answerIds: string[] }
   | { t: "mood"; value: number }
   | { t: "followup"; answers: (number | null)[] }

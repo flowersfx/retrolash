@@ -9,7 +9,7 @@ import {
   type CSSProperties,
 } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { joinUrl, makeCode, useCountdown, useRoom, type RoomEvent } from "./net";
+import { joinUrl, makeCode, screenUrl, useCountdown, useRoom, type RoomEvent } from "./net";
 import { summaryToMarkdown } from "./summary";
 import {
   getVolume,
@@ -25,7 +25,7 @@ import {
   soundReady,
   unlockAudio,
 } from "./sound";
-import { LangContext, REDUCED_MOTION, deviceLang, nextLabel, usePrompts, useT } from "./lang";
+import { LangContext, REDUCED_MOTION, deviceLang, nextLabel, usePrompts, useT, useTheme } from "./lang";
 import { strings } from "../shared/i18n";
 import {
   FOLLOWUP_OPTIONS,
@@ -36,11 +36,15 @@ import {
   PACKS,
   PLATE_COLORS,
   PODIUM_REVEAL,
+  THEMES,
+  TRIO_MIN_PLAYERS,
   places,
+  revealTiming,
   TOGGLEABLE_ROUNDS,
   autoSprintRounds,
   isHeadToHead,
   parsePreviousItems,
+  winnerOf,
   type ClientMessage,
   type FollowupItemView,
   type HostView,
@@ -110,10 +114,15 @@ function useStaged(view: HostView | null) {
   return { shown: shown ?? view, exiting };
 }
 
-export default function Host({ code }: { code: string }) {
+/**
+ * The big screen. With `screen`, an extra big screen for another room or a
+ * remote viewer: the same show (and sound), but no controls.
+ */
+export default function Host({ code, screen = false }: { code: string; screen?: boolean }) {
   // The first big screen of a room gets a token; keep it so this browser stays the host.
   const tokenKey = `retrolash:host:${code}`;
   const hello = useCallback((): ClientMessage => {
+    if (screen) return { t: "helloScreen" };
     let token: string | null = null;
     try {
       token = localStorage.getItem(tokenKey);
@@ -121,7 +130,7 @@ export default function Host({ code }: { code: string }) {
       /* private mode: this tab stays host until it closes */
     }
     return token ? { t: "helloHost", token } : { t: "helloHost" };
-  }, [tokenKey]);
+  }, [tokenKey, screen]);
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
   const nextId = useRef(0);
   const lastPop = useRef(0);
@@ -143,9 +152,13 @@ export default function Host({ code }: { code: string }) {
       sfx.pop();
     }
   }, [tokenKey]);
-  const { view, receivedAt, connected, error, send } = useRoom<HostView>(code, hello, onEvent);
+  const room = useRoom<HostView>(code, hello, onEvent);
+  const { view, receivedAt, connected, error } = room;
+  // An extra screen never sends anything but its hello.
+  const send: Send = useMemo(() => (screen ? () => {} : room.send), [screen, room.send]);
   const seconds = useCountdown(view?.remainingMs, receivedAt);
   const { shown, exiting } = useStaged(view);
+  useTheme(view?.settings.theme);
 
   // Browsers only allow sound after a gesture: unlock on the first click/key.
   useEffect(() => {
@@ -163,7 +176,7 @@ export default function Host({ code }: { code: string }) {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (!view || view.phase === "lobby") return;
+      if (screen || !view || view.phase === "lobby") return;
       if (e.key === " " || e.key === "ArrowRight" || e.key === "PageDown") {
         e.preventDefault();
         send({ t: "next" });
@@ -173,7 +186,7 @@ export default function Host({ code }: { code: string }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view, send]);
+  }, [view, send, screen]);
 
   useEffect(() => {
     if (exiting) sfx.whoosh();
@@ -197,7 +210,10 @@ export default function Host({ code }: { code: string }) {
             Retro<span>lash</span>
           </div>
           <p>{error}</p>
-          <button className="btn big" onClick={() => (location.href = `?host=${makeCode()}`)}>
+          <button className="btn big" onClick={() => (location.href = `?screen=${code}`)}>
+            {strings(deviceLang()).host.openAsScreen}
+          </button>
+          <button className="btn ghost" onClick={() => (location.href = `?host=${makeCode()}`)}>
             {strings(deviceLang()).host.newRoom}
           </button>
         </div>
@@ -222,19 +238,26 @@ export default function Host({ code }: { code: string }) {
 
   return (
     <LangContext.Provider value={lang}>
-      <main className={`host phase-${shown.phase} kind-${shown.roundKind ?? "none"}`}>
+      <main className={`host phase-${shown.phase} kind-${shown.roundKind ?? "none"} ${screen ? "is-screen" : ""}`}>
         <HostHeader view={view} seconds={seconds} paused={paused} connected={connected} />
 
         <section className="host-body">
           <div className={`stage ${exiting ? "exiting" : ""} out-${variant}`}>
-            <Stage view={shown} send={send} msLeft={msLeft} />
+            <Stage view={shown} send={send} msLeft={msLeft} screen={screen} />
           </div>
         </section>
 
         {view.phase !== "lobby" && (
           <footer className="host-footer">
             <PlayerStrip view={view} />
-            <HostControls view={view} send={send} canHold={canHold} paused={paused} />
+            {screen ? (
+              <div className="controls">
+                <span className="screen-badge">{strings(lang).host.screenBadge}</span>
+                <FullscreenButton />
+              </div>
+            ) : (
+              <HostControls view={view} send={send} canHold={canHold} paused={paused} />
+            )}
           </footer>
         )}
 
@@ -392,10 +415,10 @@ function useMusicMood(view: HostView | null) {
   useEffect(() => setMusicMood(mood), [mood]);
 }
 
-function Stage({ view, send, msLeft }: { view: HostView; send: Send; msLeft: number | null }) {
+function Stage({ view, send, msLeft, screen }: { view: HostView; send: Send; msLeft: number | null; screen: boolean }) {
   switch (view.phase) {
     case "lobby":
-      return <Lobby view={view} send={send} />;
+      return <Lobby view={view} send={send} screen={screen} />;
     case "roundIntro":
       return <Intro view={view} />;
     case "answering":
@@ -429,7 +452,7 @@ function Stage({ view, send, msLeft }: { view: HostView; send: Send; msLeft: num
     case "podium":
       return <Podium view={view} />;
     case "summary":
-      return <Summary view={view} />;
+      return <Summary view={view} screen={screen} />;
   }
 }
 
@@ -516,7 +539,7 @@ function Confetti({ count = 140 }: { count?: number }) {
 
 // ---------- lobby ----------
 
-function Lobby({ view, send }: { view: HostView; send: Send }) {
+function Lobby({ view, send, screen }: { view: HostView; send: Send; screen: boolean }) {
   const t = useT();
   const url = joinUrl(view.code);
   const players = view.players.filter((p) => !p.audience);
@@ -549,26 +572,65 @@ function Lobby({ view, send }: { view: HostView; send: Send }) {
             >
               <span className="avatar bob">{p.avatar}</span>
               <span className="pname">{p.name}</span>
-              <VipButton p={p} send={send} />
-              <button className="kick" title={t.lobby.remove} onClick={() => send({ t: "kick", playerId: p.id })}>
-                ×
-              </button>
+              {!screen && <VipButton p={p} send={send} />}
+              {!screen && (
+                <button className="kick" title={t.lobby.remove} onClick={() => send({ t: "kick", playerId: p.id })}>
+                  ×
+                </button>
+              )}
             </div>
           ))}
         </div>
-        {audience.length > 0 && <AudienceRow audience={audience} send={send} />}
+        {audience.length > 0 && <AudienceRow audience={audience} send={screen ? undefined : send} />}
 
         <PlanPreview plan={view.plan} />
-        <SettingsPanel settings={view.settings} players={connectedCount} send={send} speechAvailable={view.speechAvailable} />
-
-        <div className="start-row">
-          <button className="btn big" disabled={!canStart} onClick={() => send({ t: "start" })}>
-            {t.lobby.start}
-          </button>
-          {connectedCount < MIN_PLAYERS && <span className="muted">{t.lobby.needPlayers(MIN_PLAYERS)}</span>}
-          <FullscreenButton />
-        </div>
+        {screen ? (
+          <div className="start-row">
+            <span className="screen-badge">{t.host.screenBadge}</span>
+            <span className="muted">{t.host.screenWaiting}</span>
+            <FullscreenButton />
+          </div>
+        ) : (
+          <>
+            <SettingsPanel settings={view.settings} players={connectedCount} send={send} speechAvailable={view.speechAvailable} />
+            <div className="start-row">
+              <button className="btn big" disabled={!canStart} onClick={() => send({ t: "start" })}>
+                {t.lobby.start}
+              </button>
+              {connectedCount < MIN_PLAYERS && <span className="muted">{t.lobby.needPlayers(MIN_PLAYERS)}</span>}
+              <FullscreenButton />
+            </div>
+            <ExtraScreenLink code={view.code} />
+          </>
+        )}
       </div>
+    </div>
+  );
+}
+
+/** The link for another big screen: a second meeting room, or remote people next to Teams. */
+function ExtraScreenLink({ code }: { code: string }) {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
+  const url = screenUrl(code);
+  return (
+    <div className="extra-screen">
+      <span className="muted">{t.host.extraScreen}</span>
+      <code>{url.replace(/^https?:\/\//, "")}</code>
+      <button
+        className="btn ghost small"
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(url);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          } catch {
+            /* no clipboard: the link is on screen */
+          }
+        }}
+      >
+        {copied ? t.host.copied : t.host.copyLink}
+      </button>
     </div>
   );
 }
@@ -670,6 +732,13 @@ function SettingsPanel({
             </button>
           ))}
         </div>
+        <div className="seg" role="group" aria-label={t.settings.theme}>
+          {THEMES.map((th) => (
+            <button key={th} className={settings.theme === th ? "on" : ""} onClick={() => update({ theme: th })}>
+              {t.settings.themes[th]}
+            </button>
+          ))}
+        </div>
         <button className="btn ghost small" onClick={() => setOpen(!open)}>
           {open ? t.settings.hide : t.settings.more}
         </button>
@@ -731,6 +800,10 @@ function SettingsPanel({
           <label>
             {t.settings.lashVotes}
             <input type="number" min={1} max={5} value={settings.lashVotes} onChange={(e) => update({ lashVotes: +e.target.value })} />
+          </label>
+          <label className="toggle wide">
+            <input type="checkbox" checked={settings.trios} onChange={(e) => update({ trios: e.target.checked })} />
+            <span>{t.settings.trios(TRIO_MIN_PLAYERS)}</span>
           </label>
           <label className="wide">
             {t.settings.finalPrompt}
@@ -1039,16 +1112,19 @@ function MatchupIntro({
 }
 
 interface Token {
-  side: 0 | 1;
+  side: number;
   voter: PlateData | null;
 }
 
+/** Where each card flies in from: left and right, and the middle one of three from below. */
+const FLY = { 2: ["fly-left", "fly-right"], 3: ["fly-left", "fly-up", "fly-right"] } as Record<number, string[]>;
+
 /**
- * One head-to-head: intro → cards fly in for voting → the reveal. On reveal,
- * the voters' name plates line up under the cards and fly onto the answer they
- * picked, one by one. Then the numbers, authors and winner appear. A clean
- * sweep is a RETROLASH: the losing card is knocked out and the winner takes
- * centre stage.
+ * One matchup (two answers, or three with a big team): intro → cards fly in
+ * for voting → the reveal. On reveal, the voters' name plates line up under
+ * the cards and fly onto the answer they picked, one by one. Then the numbers,
+ * authors and winner appear. A clean sweep is a RETROLASH: the other cards are
+ * knocked out and the winner takes centre stage.
  */
 function Matchup({
   m,
@@ -1082,8 +1158,8 @@ function Matchup({
     setStep(0);
     const timers: ReturnType<typeof setTimeout>[] = [];
     const n = order.length;
-    const STEP = Math.max(170, Math.min(420, 4200 / Math.max(1, n)));
-    const START = 900;
+    // Shared with the server, which times the host's spoken reaction to land with the result.
+    const { start, step: STEP, result: end } = revealTiming(n);
     sfx.drumroll(0.8);
     order.forEach((_, i) => {
       timers.push(
@@ -1092,10 +1168,9 @@ function Matchup({
           rects.current[i] = el?.getBoundingClientRect();
           setStep(i + 1);
           sfx.blip(i);
-        }, START + i * STEP),
+        }, start + i * STEP),
       );
     });
-    const end = START + n * STEP + 400;
     timers.push(
       setTimeout(() => {
         setStep(n + 1);
@@ -1119,8 +1194,9 @@ function Matchup({
 
   const final = reveal && step > order.length;
   const extras = reveal && step > order.length + 1;
-  const total = (m.votes?.[0] ?? 0) + (m.votes?.[1] ?? 0);
-  const winner = final && m.votes && m.votes[0] !== m.votes[1] ? (m.votes[0] > m.votes[1] ? 0 : 1) : null;
+  const sides = m.answers.length;
+  const total = (m.votes ?? []).reduce((a, b) => a + b, 0);
+  const winner = final && m.votes ? winnerOf(m.votes) : null;
   const lash = final && !!m.unanimous && winner !== null;
   const landed = order.slice(0, step);
   const line = final ? resultLine(m, P.commentary) : null;
@@ -1132,8 +1208,8 @@ function Matchup({
     <div className="matchup">
       <div className="matchup-count muted">{t.stage.matchupOf(number, count)}</div>
       <h1 className="prompt-big settle">{m.prompt}</h1>
-      <div className={`versus ${lash ? "retrolash" : ""}`}>
-        {[0, 1].map((i) => {
+      <div className={`versus sides-${sides} ${lash ? "retrolash" : ""}`}>
+        {m.answers.map((_, i) => {
           const votes = m.votes?.[i] ?? 0;
           const pct = total ? Math.round((votes / total) * 100) : 0;
           const author = m.authorPlates?.[i];
@@ -1145,7 +1221,7 @@ function Matchup({
               className={[
                 "answer-card",
                 `side-${i}`,
-                reveal ? "" : `fly-${i === 0 ? "left" : "right"}`,
+                reveal ? "" : (FLY[sides]?.[i] ?? "fly-up"),
                 final ? "revealed" : "",
                 isWinner ? "winner" : "",
                 isLoser ? "loser" : "",
@@ -1193,8 +1269,9 @@ function Matchup({
             </div>
           );
         })}
-        <div className="vs">VS</div>
+        {sides === 2 && <div className="vs">VS</div>}
       </div>
+      {final && !!m.skips && <p className="muted skips slide-up">{t.stage.skips(m.skips)}</p>}
       {reveal && plates && !final && (
         <div className={`voter-pool ${order.length > 8 ? "crowd" : ""}`} ref={poolRef}>
           {order.map((tk, i) =>
@@ -1239,23 +1316,22 @@ function Matchup({
 
 /** Votes as tokens, interleaved between the sides so the tension builds. */
 function voteOrder(m: MatchupView): Token[] {
-  const sides: [(PlateData | null)[], (PlateData | null)[]] = m.voters ?? [
-    Array.from({ length: m.votes?.[0] ?? 0 }, () => null),
-    Array.from({ length: m.votes?.[1] ?? 0 }, () => null),
-  ];
+  const sides: (PlateData | null)[][] =
+    m.voters ?? (m.votes ?? []).map((n) => Array.from({ length: n }, () => null));
   const out: Token[] = [];
-  for (let i = 0; i < Math.max(sides[0].length, sides[1].length); i++) {
-    if (i < sides[0].length) out.push({ side: 0, voter: sides[0][i] });
-    if (i < sides[1].length) out.push({ side: 1, voter: sides[1][i] });
-  }
+  const longest = Math.max(0, ...sides.map((s) => s.length));
+  for (let i = 0; i < longest; i++)
+    sides.forEach((s, side) => {
+      if (i < s.length) out.push({ side, voter: s[i] });
+    });
   return out;
 }
 
 function resultLine(m: MatchupView, c: ReturnType<typeof usePrompts>["commentary"]) {
-  const [a, b] = m.votes ?? [0, 0];
+  const [a = 0, b = 0] = [...(m.votes ?? [])].sort((x, y) => y - x);
   if (m.unanimous) return pick(c.unanimous, m.id);
   if (a === b) return pick(c.tie, m.id);
-  if (Math.abs(a - b) === 1) return pick(c.close, m.id);
+  if (a - b === 1) return pick(c.close, m.id);
   return pick(c.blowout, m.id);
 }
 
@@ -1620,7 +1696,7 @@ function LashItem({
 
 // ---------- summary ----------
 
-function Summary({ view }: { view: HostView }) {
+function Summary({ view, screen }: { view: HostView; screen: boolean }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
   const md = summaryToMarkdown(view);
@@ -1718,7 +1794,7 @@ function Summary({ view }: { view: HostView }) {
           )}
         </section>
       </div>
-      <div className="start-row">
+      <div className="start-row" hidden={screen}>
         <button
           className="btn"
           onClick={async () => {
