@@ -198,7 +198,7 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 13.13 | Lobby | "Today's line-up" (Swedish "Dagens program") |
 | 13.6 | Lobby settings | Labelled rows (Rounds, Sprint format, Language + Look, Options); *More settings* opens an even three-column grid |
 
-## 14. Security hardening (unreleased)
+## 14. Security hardening (v0.8.2, v0.8.3)
 
 | # | Step | Expected |
 |---|------|----------|
@@ -206,7 +206,8 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 14.2 | Open `?screen=CODE` before the big screen exists, then start the game on the big screen | The extra screen shows the no-game message, then picks the game up by itself within a few seconds |
 | 14.3 | Mid-game, close a phone's tab and scan the QR again with the same name | Same player as before (rejoin still works) |
 | 14.4 | Deploy while a game from the previous version is running | Phones of that game reconnect as themselves |
-| 14.5 | After deploying, start a game and check the container logs | No "refused a new room" lines for normal use. If one shows up, the address it logs should be the real client address, not an ingress one |
+| 14.5 | After deploying, start a game and check the container logs | A "new room ABCD from a.b.x.x" line with your public address (checked live on 2026-11-19) and no "refused" lines in normal use |
+| 14.6 | Landing page after a game with speech on | A second line: "This month: N h server time (x% of the free 200 h) · N speech characters (y% of the free 500,000)" |
 
 ## Known gaps to check while testing
 
