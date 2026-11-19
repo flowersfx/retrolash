@@ -184,6 +184,10 @@ interface GameState {
   /** SHA-256 of the big screen's secret; the first big screen gets the secret. */
   hostTokenHash?: string;
   startedAt?: number;
+  /** Random id pairing a game's start and finish in the usage file (not the room code). */
+  gameId?: string;
+  /** Most extra screens watching at once during this game. */
+  maxScreens?: number;
   /** Device id → player id, for someone who came back on another tab or browser. */
   aliases: Record<string, string>;
 }
@@ -378,6 +382,8 @@ export class GameRoom {
       case "helloScreen":
         // Anyone with the room code may watch; a screen sends nothing else.
         conn.setState({ role: "screen" });
+        if (this.state.phase !== "lobby")
+          this.state.maxScreens = Math.max(this.state.maxScreens ?? 0, this.screenCount());
         return this.sendView(conn);
       case "helloPlayer":
         return this.onPlayerHello(conn, msg);
@@ -571,6 +577,8 @@ export class GameRoom {
         s.leadChange = null;
         s.players.forEach((p) => (p.score = 0));
         s.startedAt = Date.now();
+        s.gameId = randomBytes(6).toString("hex");
+        s.maxScreens = this.screenCount();
         this.prefetchLobby();
         this.startRound();
         this.usage("start");
@@ -1140,13 +1148,18 @@ export class GameRoom {
     const base: UsageEvent = {
       event,
       at: new Date().toISOString(),
+      ...(s.gameId ? { game: s.gameId } : {}),
       players,
       audience: s.players.length - players,
+      // Test bots (scripts/bots.mjs) have device ids starting with "bot-": summaries leave those games out.
+      bots: s.players.filter((p) => p.id.startsWith("bot-")).length,
       rounds: s.plan.length,
       lang: s.settings.lang,
       pack: s.settings.pack,
       speech: !!this.speech?.enabled && s.settings.speech,
       anonymous: s.settings.anonymous,
+      trios: s.settings.trios,
+      promptsEach: s.settings.promptsEach,
     };
     if (event === "start") return this.onUsage(base);
     const matchups = s.rounds.flatMap((r) => r.matchups.filter((m) => m.closed));
@@ -1154,12 +1167,38 @@ export class GameRoom {
     this.onUsage({
       ...base,
       minutes: s.startedAt ? Math.round((Date.now() - s.startedAt) / 6000) / 10 : 0,
+      active: this.activePlayers(),
       matchups: matchups.length,
       autoAnswers: matchups.reduce((a, m) => a + (m.auto?.filter(Boolean).length ?? 0), 0),
       kudos: Object.keys(s.rounds.find((r) => r.kind === "kudos")?.kudos ?? {}).length,
       actionItems: lash?.lashAnswers.length ?? 0,
       owned: lash?.lashAnswers.filter((a) => a.owners?.length).length ?? 0,
+      screens: s.maxScreens ?? 0,
+      vip: s.players.some((p) => p.vip),
     });
+  }
+
+  /** Players (not audience) who actually took part: wrote, voted, checked in or sent kudos. */
+  activePlayers() {
+    const ids = new Set<string>();
+    for (const r of this.state.rounds) {
+      for (const m of r.matchups) {
+        m.playerIds.forEach((id, i) => m.answers[i] !== null && !m.auto?.[i] && ids.add(id));
+        Object.keys(m.votes).forEach((id) => ids.add(id));
+        (m.skips ?? []).forEach((id) => ids.add(id));
+      }
+      Object.keys(r.moods ?? {}).forEach((id) => ids.add(id));
+      Object.keys(r.kudos ?? {}).forEach((id) => ids.add(id));
+      Object.keys(r.followupBallots ?? {}).forEach((id) => ids.add(id));
+      Object.keys(r.lashBallots).forEach((id) => ids.add(id));
+      r.lashAnswers.forEach((a) => ids.add(a.playerId));
+    }
+    return this.state.players.filter((p) => !p.audience && ids.has(p.id)).length;
+  }
+
+  /** Extra screens connected right now. */
+  screenCount() {
+    return [...this.room.getConnections()].filter((c) => (c.state as ConnState)?.role === "screen").length;
   }
 
   /** Host pressed "next", or a timer ran out. */

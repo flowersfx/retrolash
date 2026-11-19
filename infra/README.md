@@ -100,13 +100,13 @@ az containerapp update -n retrolash -g rg-retrolash --subscription <id> --image 
 
 ## Usage numbers
 
-Each game start and finish appends one JSON line to `usage.jsonl` on the file share: player and audience counts, rounds, minutes, language, pack, whether speech and Anonymous mode were on, matchups, auto-answers, kudos and action items. No names, answers or room codes. Console logs disappear when the app scales to zero, so the file is the record. To read it (PowerShell):
+Each game start and finish appends one JSON line to `usage.jsonl` on the file share: a random game id pairing the two, player and audience counts, players who actually took part, test bots, rounds, minutes, language, pack, whether speech and Anonymous mode were on, matchups, auto-answers, kudos and action items. Also whether extra screens or a VIP phone were used. No names, answers or room codes. Summaries leave out test games (any `bot-` players, or old lines under 8 minutes); the landing page shows the totals via `/api/stats`. Console logs disappear when the app scales to zero, so the file is the record. To read it (PowerShell):
 
 ```powershell
 $sa  = az storage account list -g rg-retrolash --subscription <id> --query "[0].name" -o tsv
 $key = az storage account keys list -n $sa -g rg-retrolash --subscription <id> --query "[0].value" -o tsv
 az storage file download --account-name $sa --account-key $key --share-name data --path usage.jsonl --dest usage.jsonl
-node scripts/usage.mjs usage.jsonl
+npx tsx scripts/usage.ts usage.jsonl          # add --all to include test games
 ```
 
 ## Known limits

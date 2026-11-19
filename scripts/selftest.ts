@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { AzureSpeech } from "../server/tts";
 import { FileStorage } from "../server/storage";
+import { parseUsage, summarize } from "../server/usage";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
 const md = `# Retro 2026-11-09
@@ -361,6 +362,30 @@ assert.equal(groupPlayers(Array.from({ length: 12 }, (_, i) => `r${i}`), true, 1
   assert.deepEqual(spoken.map((c) => c.at), v.kudosAt, "each card lands as its note is read");
   assert.ok(v.kudosAt![1] - v.kudosAt![0] >= spoken[0].ms, "cards wait for the voice");
   g.dispose();
+}
+
+// Usage summary: bot games and short legacy games are tests; abandoned = started, never finished.
+{
+  const lines = parseUsage(
+    [
+      { event: "game", at: "2026-11-11T11:00:00Z", players: 4, audience: 1, minutes: 1.7 }, // legacy bot test
+      { event: "game", at: "2026-11-14T22:46:00Z", players: 15, audience: 0, minutes: 40 }, // legacy real
+      { event: "start", at: "2026-11-20T09:00:00Z", game: "a1", players: 6, audience: 0, bots: 0 },
+      { event: "game", at: "2026-11-20T09:35:00Z", game: "a1", players: 6, audience: 0, bots: 0, minutes: 35, active: 5, actionItems: 4, owned: 2, kudos: 5 },
+      { event: "start", at: "2026-11-20T10:00:00Z", game: "b2", players: 5, audience: 0, bots: 0 }, // abandoned
+      { event: "game", at: "2026-11-20T11:00:00Z", game: "c3", players: 9, audience: 1, bots: 9, minutes: 5 }, // bots
+    ]
+      .map((e) => JSON.stringify(e))
+      .join(String.fromCharCode(10)) + String.fromCharCode(10) + "not json",
+  );
+  const u = summarize(lines, { now: new Date("2026-11-20T18:00:00Z") });
+  assert.equal(u.games, 2);
+  assert.equal(u.thisMonth, 2);
+  assert.equal(u.players, 10, "active players when known (5), the list otherwise (15)");
+  assert.equal(u.abandoned, 1);
+  assert.equal(u.tests, 2);
+  assert.equal(u.ownedShare, 0.5);
+  assert.equal(summarize(lines, { includeTests: true }).games, 4);
 }
 
 console.log("selftest OK");

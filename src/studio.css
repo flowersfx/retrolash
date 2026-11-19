@@ -202,6 +202,9 @@ select, option { font-family: var(--body); }
 }
 .now-playing { text-align: left; font-style: italic; }
 
+/* Landing page: running totals, quietly. */
+.usage-line { margin: auto 0 0; padding-top: 2.5rem; font-size: 0.85rem; color: var(--muted); opacity: 0.75; text-align: center; font-variant-numeric: tabular-nums; }
+
 /* Landing page illustrations. */
 .home-art { width: 100%; max-width: 320px; height: auto; display: block; margin: -0.5rem auto 0.2rem; overflow: visible; }
 .home .card { padding-top: 1.6rem; }

@@ -7,12 +7,13 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createReadStream } from "node:fs";
-import { appendFile, mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import { GameRoom, type Connection, type Room } from "./game";
 import { FileStorage } from "./storage";
+import { parseUsage, summarize, type UsageSummary } from "./usage";
 import { AzureSpeech } from "./tts";
 
 const PORT = Number(process.env.PORT ?? 1999);
@@ -49,12 +50,26 @@ function recordUsage(e: Record<string, unknown>) {
   const line = JSON.stringify(e);
   log("usage", line);
   if (persist) void appendFile(path.join(DATA_DIR, "usage.jsonl"), line + "\n").catch((err) => log("usage: write failed", err));
+  statsCache = null;
 }
 
 const ROOM_PATH = /^\/parties\/main\/([a-z]{4})\/?$/;
 const DEVICE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 const log = (...args: unknown[]) => console.log(new Date().toISOString(), ...args);
+
+// ---------- usage summary (landing page) ----------
+
+let statsCache: { at: number; value: UsageSummary } | null = null;
+
+/** The usage summary, re-read at most once a minute. */
+async function usageStats(): Promise<UsageSummary> {
+  if (statsCache && Date.now() - statsCache.at < 60_000) return statsCache.value;
+  const text = persist ? await readFile(path.join(DATA_DIR, "usage.jsonl"), "utf8").catch(() => "") : "";
+  const value = summarize(parseUsage(text));
+  statsCache = { at: Date.now(), value };
+  return value;
+}
 
 // ---------- storage ----------
 
@@ -201,6 +216,19 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", "http://x");
   if (url.pathname === "/healthz") {
     res.writeHead(200, { "Content-Type": "text/plain", ...SECURITY_HEADERS }).end("ok");
+    return;
+  }
+  // Totals and averages for the landing page. Counts only, test games left out.
+  if (url.pathname === "/api/stats") {
+    const body = JSON.stringify(await usageStats());
+    res.writeHead(200, {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+      // The dev client runs on another port; the numbers are public anyway.
+      "Access-Control-Allow-Origin": "*",
+      ...SECURITY_HEADERS,
+    });
+    res.end(req.method === "HEAD" ? undefined : body);
     return;
   }
   let rel: string;

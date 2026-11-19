@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { normalizeCode } from "./net";
+import { useEffect, useState } from "react";
+import { PARTY_HOST, normalizeCode } from "./net";
 import { BigScreenArt, PhoneArt } from "./Illustrations";
 
 export default function Home({
@@ -51,6 +51,30 @@ export default function Home({
           </form>
         </section>
       </div>
+      <UsageLine />
     </main>
   );
+}
+
+type Stats = { games: number; thisMonth: number; players: number; minutes: number; actionItems: number; ownedShare: number; kudos: number };
+
+/** A quiet line with the running totals (from /api/stats). Nothing until there's something to show. */
+function UsageLine() {
+  const [s, setS] = useState<Stats | null>(null);
+  useEffect(() => {
+    const base = import.meta.env.DEV ? `${location.protocol}//${PARTY_HOST}` : "";
+    fetch(`${base}/api/stats`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((x: Stats | null) => x && x.games > 0 && setS(x))
+      .catch(() => {});
+  }, []);
+  if (!s) return null;
+  const parts = [
+    `${s.games} ${s.games === 1 ? "retro" : "retros"} played`,
+    s.thisMonth ? `${s.thisMonth} this month` : null,
+    `${Math.round(s.players)} players and ${Math.round(s.minutes)} min on average`,
+    s.actionItems ? `${s.actionItems} action items (${Math.round(s.ownedShare * 100)}% owned)` : null,
+    s.kudos ? `${s.kudos} kudos` : null,
+  ].filter(Boolean);
+  return <p className="usage-line">{parts.join(" · ")}</p>;
 }

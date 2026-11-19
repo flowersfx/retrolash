@@ -198,6 +198,10 @@ async function check(v) {
   const usage = readFileSync(path.join(DATA_DIR, "usage.jsonl"), "utf8");
   const games = usage.trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.event === "game");
   if (games.length !== 1 || games[0].players !== PLAYERS) fail(`usage file wrong: ${usage}`);
+  const g = games[0];
+  if (g.bots < PLAYERS || g.active !== PLAYERS || !g.game || g.screens !== 1 || !g.vip) fail(`usage fields wrong: ${JSON.stringify(g)}`);
+  const stats = await (await fetch(`${base}/api/stats`)).json();
+  if (stats.games !== 0 || stats.tests < 2) fail(`/api/stats should leave the bot game out: ${JSON.stringify(stats)}`);
   if (!tv.phases.has("summary") || !tv.phases.has("matchupResult")) fail(`the extra screen missed screens: ${[...tv.phases]}`);
   if (tv.reactions === 0) fail("the extra screen got no reactions");
   console.log(`extra screen: ${tv.views} views, ${tv.reactions} reactions`);

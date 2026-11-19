@@ -58,6 +58,10 @@ Someone dropping in mid-retro (a PO, a manager) can tap **Join as audience** on 
 - After each matchup, the phone shows your own result: won or lost, the votes, the points.
 - Closing the tab by mistake, or a phone dropping it while the screen is off, is fine: opening the link again picks up the same player. Joining from another browser with the same name takes over that player if it's offline. *Leave the game* on the phone (lobby only) removes you, the big screen shows who left, and you can join again as someone else; `/?room=<code>&new` skips the automatic rejoin (for testing several players in one browser).
 
+## Usage numbers
+
+The landing page shows a quiet line of running totals: retros played, this month, average players and length, action items and how many got an owner, kudos. It comes from `/api/stats`, which summarises the server's usage file (counts only, no names or answers). Bot test games are left out. For the full breakdown, see [infra/README.md](infra/README.md#usage-numbers).
+
 ## Development
 
 ```bash

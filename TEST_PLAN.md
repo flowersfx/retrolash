@@ -163,7 +163,7 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 11.4 | Round intros (English) | The voice says "Round 2. Warm-up!" in a cheerful tone; Swedish uses Sofie's normal voice |
 | 11.5 | Podium with speech on | "And the winner is…" during the drumroll, the winner's name as first place appears |
 | 11.6 | After the last round | *Best of the retro*: up to three answers fly in one by one, clean sweeps marked RETROLASH, authors shown unless Anonymous mode |
-| 11.7 | After a finished game, download `usage.jsonl` (infra README) and run `node scripts/usage.mjs usage.jsonl` | The game is counted; the file has no names or answers |
+| 11.7 | After a finished game, download `usage.jsonl` (infra README) and run `npx tsx scripts/usage.ts usage.jsonl` | The game is counted; the file has no names or answers |
 
 ## 12. v0.6
 
