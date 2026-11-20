@@ -3,12 +3,15 @@
    The original neon look is still there as the "Party" theme: everything under
    [data-theme="studio"] only applies to Studio. */
 
-/* ---------- emoji: the same on every device ----------
-   Noto Color Emoji comes right after the text font, so letters and digits stay
-   in Bricolage/Inter and every emoji, in any element, comes from Noto. */
+/* ---------- emoji: the same everywhere we can ----------
+   The emoji font comes right after the text font, so letters and digits stay
+   in Bricolage/Inter and every emoji, in any element, comes from it.
+   Apple devices use their own Apple Color Emoji: Google Fonts sends Safari (and
+   every iPhone browser) an SVG-in-font Noto that WebKit draws as blanks. It's
+   only installed on Apple devices, so everyone else gets Noto as before. */
 :root {
-  --display: "Bricolage Grotesque", "Noto Color Emoji", system-ui, sans-serif;
-  --body: "Inter", "Noto Color Emoji", system-ui, sans-serif;
+  --display: "Bricolage Grotesque", "Apple Color Emoji", "Noto Color Emoji", system-ui, sans-serif;
+  --body: "Inter", "Apple Color Emoji", "Noto Color Emoji", system-ui, sans-serif;
 }
 select, option { font-family: var(--body); }
 

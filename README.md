@@ -44,7 +44,7 @@ Someone dropping in mid-retro (a PO, a manager) can tap **Join as audience** on 
 
 - The browser that opens a room first becomes its big screen and keeps a secret for it. Another browser opening `/?host=<code>` is turned away, so players who see the room code can't take over. On another laptop, start a new room, or make someone VIP to run the game from a phone.
 - **Extra screens** for a second meeting room or remote people: `/?screen=<code>` (the lobby shows the link). They show the same show with their own sound, but can't control anything. See [docs/TEAMS.md](docs/TEAMS.md) for running hybrid retros with Teams.
-- **Look:** *Studio* (default, calmer colours for meeting rooms) or *Party* (the original neon), in the lobby. Emoji come from one web font (Noto Color Emoji), so they look the same on every device.
+- **Look:** *Studio* (default, calmer colours for meeting rooms) or *Party* (the original neon), in the lobby. Emoji come from one web font (Noto Color Emoji), so they look the same on Windows, Android and Linux; Apple devices use their own Apple Color Emoji (Safari can't draw the web font).
 
 - **Space**, **→** or **Page Down** advances or skips the timer, presenter-clicker style.
 - **P** holds the timer (for a longer discussion) and resumes it.

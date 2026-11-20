@@ -231,6 +231,13 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 16.3 | With answers read aloud, have everyone vote straight away | The reading still finishes (all 2 or 3 answers and the "versus" lines) before the vote animation starts |
 | 16.4 | Same, but the facilitator presses Next during the reading | Voting ends at once (the facilitator can always skip) |
 
+## 17. Emoji on Apple devices (v0.8.7)
+
+| # | Step | Expected |
+|---|------|----------|
+| 17.1 | Open the join form and a game's big screen in Safari on a Mac, and in Safari and Chrome on an iPhone | Every avatar, reaction and emoji answer shows (Apple's own emoji), no blanks or boxes |
+| 17.2 | The same on Windows (Chrome/Edge) and Android | Noto emoji as before |
+
 ## Known gaps to check while testing
 
 - A phone that rejoins from a *different browser* with the same name can only take over once the old connection is gone (up to ~20 s after the phone slept). Until then it gets "Name 2"; remove the stale one in the lobby.
