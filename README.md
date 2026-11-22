@@ -15,7 +15,7 @@ A Quiplash-style party game for Scrum retrospectives. The meeting-room screen ho
 9. **Highlights and podium.** The three best answers of the game come back one by one. Then third place, second place, a drumroll and the winner with a crown and confetti (equal scores share a place). The podium is skipped in Anonymous mode.
 10. **Summary.** Action items with owners, the sprint weather, the follow-up results, kudos, every sprint answer with its votes, and the scores. *Copy as Markdown* pastes into Confluence, Jira or Slack; *Download .md* saves it. Next time, paste that Markdown into the lobby to run *Did we do it?*.
 
-Everything up to the Last Lash results moves on by itself on timers, so the game keeps going even if the facilitator gets pulled into the discussion. The Last Lash results and the summary wait for the facilitator.
+Everything up to the Last Lash results moves on by itself, so the game keeps going even if the facilitator gets pulled into the discussion. Writing and voting have no time limit by default: they end as soon as everyone is done (or when the facilitator presses Next). Results and discussions run on timers. The Last Lash results and the summary wait for the facilitator.
 
 The whole game (screens, phones, prompts and the Markdown export) is available in **English and Swedish**; switch in the lobby.
 
@@ -48,7 +48,7 @@ Someone dropping in mid-retro (a PO, a manager) can tap **Join as audience** on 
 
 - **Space**, **→** or **Page Down** advances or skips the timer, presenter-clicker style.
 - **P** holds the timer (for a longer discussion) and resumes it.
-- In the lobby you can pick rounds, the number of Sprint rounds, the discussion time (*Wait for me* to advance by hand, or *0 s* to move straight on after a short cooldown for informal retros), timers and the final-round prompt. You can also add **your own retro prompts**, one per line, which are used first in *The Sprint*, and paste **last retro's action items**.
+- In the lobby you can pick rounds, the number of Sprint rounds, the discussion time (*Wait for me* to advance by hand, or *0 s* to move straight on after a short cooldown for informal retros), answer and vote time limits (*No limit* by default) and the final-round prompt. You can also add **your own retro prompts**, one per line, which are used first in *The Sprint*, and paste **last retro's action items**.
 - Hover over a player in the lobby to remove them. Audience members can be removed at any time.
 - Click 🎛️ on a player or audience member to make them **VIP**. Their phone becomes a remote control (Start, Next, Hold), so the facilitator can step away from the laptop.
 

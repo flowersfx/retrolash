@@ -238,6 +238,18 @@ Play one full game with Warm-up → The Sprint → Last Lash.
 | 17.1 | Open the join form and a game's big screen in Safari on a Mac, and in Safari and Chrome on an iPhone | Every avatar, reaction and emoji answer shows (Apple's own emoji), no blanks or boxes |
 | 17.2 | The same on Windows (Chrome/Edge) and Android | Noto emoji as before |
 
+## 18. No answer/vote limit, slower standings (v0.8.8)
+
+| # | Step | Expected |
+|---|------|----------|
+| 18.1 | Open a new lobby's settings | Answer time and Vote time say "No limit (until everyone is done)" |
+| 18.2 | Play a head-to-head round; one player waits a long time before answering | No countdown on the big screen; writing ends the moment the last player submits |
+| 18.3 | Same, one player never answers | The game waits; Next on the big screen (or the VIP phone) moves on, and the missing answer gets a 🆘 quip |
+| 18.4 | Same during voting | Voting ends once every player has voted and the answers have been read; audience still gets its few seconds of grace |
+| 18.5 | A player's phone goes offline mid-writing and stays off | After about 45 s the game stops waiting for them |
+| 18.6 | End a round with scores | The voice line plays first, then rows land one by one from last place up, a drumroll, then the leader (fanfare and "new leader" callout on a lead change) |
+| 18.7 | Set answer time to 90 s | The countdown is back, as before |
+
 ## Known gaps to check while testing
 
 - A phone that rejoins from a *different browser* with the same name can only take over once the old connection is gone (up to ~20 s after the phone slept). Until then it gets "Name 2"; remove the stale one in the lobby.

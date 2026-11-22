@@ -47,6 +47,7 @@ import {
   TRIO_MIN_PLAYERS,
   places,
   revealTiming,
+  standingsTiming,
   TOGGLEABLE_ROUNDS,
   autoSprintRounds,
   isHeadToHead,
@@ -444,8 +445,8 @@ function usePhaseSounds(view: HostView | null, seconds: number | null) {
         break;
       case "pollResult":
       case "roundResult":
+        // The round's standings play their own stings and fanfare as rows land.
         sfx.sting(0.2);
-        if (view.leadChange) sfx.fanfare(1.6);
         break;
       case "summary":
         sfx.sting(0.3);
@@ -873,11 +874,25 @@ function SettingsPanel({
           </label>
           <label>
             {t.settings.answerTime}
-            <input type="number" min={20} max={300} value={settings.answerSeconds} onChange={(e) => update({ answerSeconds: +e.target.value })} />
+            <select value={settings.answerSeconds} onChange={(e) => update({ answerSeconds: +e.target.value })}>
+              <option value={0}>{t.settings.noLimit}</option>
+              {withCurrent([60, 90, 120, 180, 300], settings.answerSeconds).map((s) => (
+                <option key={s} value={s}>
+                  {s} s
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             {t.settings.voteTime}
-            <input type="number" min={10} max={120} value={settings.voteSeconds} onChange={(e) => update({ voteSeconds: +e.target.value })} />
+            <select value={settings.voteSeconds} onChange={(e) => update({ voteSeconds: +e.target.value })}>
+              <option value={0}>{t.settings.noLimit}</option>
+              {withCurrent([15, 25, 45, 60, 90, 120], settings.voteSeconds).map((s) => (
+                <option key={s} value={s}>
+                  {s} s
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             {t.settings.lashAnswers}
@@ -942,6 +957,10 @@ function SettingsPanel({
 }
 
 // ---------- in-game pieces ----------
+
+/** Preset choices, plus the current value if it's something else (an older saved game). */
+const withCurrent = (presets: number[], current: number) =>
+  current > 0 && !presets.includes(current) ? [...presets, current].sort((a, b) => a - b) : presets;
 
 function Timer({ seconds, urgent }: { seconds: number; urgent: boolean }) {
   const hot = urgent && seconds <= 10;
@@ -1581,6 +1600,16 @@ function RoundResult({ view }: { view: HostView }) {
   const t = useT();
   const P = usePrompts();
   const ranked = view.players.filter((p) => !p.audience).sort((a, b) => b.score - a.score);
+  // Wait for the voice ("Let's see the scores"), then reveal from last place up, leader last.
+  const voiceEnd = Math.max(0, ...(view.say ?? []).map((c) => (c.at ?? 0) + c.ms));
+  const timing = standingsTiming(ranked.length, voiceEnd);
+  const [leaderIn, setLeaderIn] = useState(REDUCED_MOTION);
+  useEffect(() => {
+    if (REDUCED_MOTION || view.settings.anonymous) return;
+    const id = setTimeout(() => setLeaderIn(true), timing.leader);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
     <div className="round-result">
       <h1 className="huge drop-in">{t.stage.roundDone(view.roundTitle ?? "")}</h1>
@@ -1588,37 +1617,68 @@ function RoundResult({ view }: { view: HostView }) {
         <p className="muted big-text">{t.stage.anonNoScores}</p>
       ) : (
         <>
-          <Scoreboard players={ranked} />
-          {view.leadChange ? (
-            <div className="callout" style={{ animationDelay: "1.4s" }}>
-              {t.stage.leadChange(view.leadChange)}
-            </div>
-          ) : (
-            <Commentary line={pick(P.commentary.roundDone, view.roundTitle ?? "")} delay={1200} />
-          )}
+          <Scoreboard players={ranked} timing={timing} leadChange={!!view.leadChange} />
+          {leaderIn &&
+            (view.leadChange ? (
+              <div className="callout" style={{ animationDelay: "0.6s" }}>
+                {t.stage.leadChange(view.leadChange)}
+              </div>
+            ) : (
+              <Commentary line={pick(P.commentary.roundDone, view.roundTitle ?? "")} delay={900} />
+            ))}
         </>
       )}
     </div>
   );
 }
 
-function Scoreboard({ players }: { players: PublicPlayer[] }) {
+function Scoreboard({
+  players,
+  timing,
+  leadChange,
+}: {
+  players: PublicPlayer[];
+  /** Without timing (the summary) every row shows at once. */
+  timing?: ReturnType<typeof standingsTiming>;
+  leadChange?: boolean;
+}) {
   const max = Math.max(1, ...players.map((p) => p.score));
   const place = places(players.map((p) => p.score));
+  const leaders = place.filter((x) => x === 1).length;
+  // How many rows are showing, counted from the bottom. Joint leaders land together.
+  const [shown, setShown] = useState(REDUCED_MOTION || !timing ? players.length : 0);
+  useEffect(() => {
+    if (REDUCED_MOTION || !timing) return;
+    const others = players.length - leaders;
+    const timers = Array.from({ length: others }, (_, i) =>
+      setTimeout(() => (setShown(i + 1), sfx.blip(i)), timing.start + i * timing.step),
+    );
+    timers.push(setTimeout(() => sfx.drumroll(0.9), Math.max(timing.start, timing.leader - 1000)));
+    timers.push(
+      setTimeout(() => {
+        setShown(players.length);
+        if (leadChange) sfx.fanfare();
+        else sfx.sting();
+      }, timing.leader),
+    );
+    return () => timers.forEach(clearTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
     <ol className="scoreboard">
-      {players.map((p, i) => (
-        <li key={p.id} style={{ animationDelay: `${(players.length - i) * 120}ms` }} className={place[i] === 1 ? "leader" : ""}>
-          <span className="rank">{place[i] === 1 ? "👑" : place[i]}</span>
-          <Plate p={p} />
-          <span className="score-bar">
-            <span style={{ width: `${(p.score / max) * 100}%`, background: p.color }} />
-          </span>
-          <span className="score">
-            <CountUp to={p.score} ms={1200} />
-          </span>
-        </li>
-      ))}
+      {players.map((p, i) => {
+        const visible = i >= players.length - shown;
+        return (
+          <li key={p.id} className={`${place[i] === 1 ? "leader" : ""} ${visible ? "" : "hidden"}`}>
+            <span className="rank">{place[i] === 1 ? "👑" : place[i]}</span>
+            <Plate p={p} />
+            <span className="score-bar">
+              {visible && <span style={{ width: `${(p.score / max) * 100}%`, background: p.color }} />}
+            </span>
+            <span className="score">{visible ? <CountUp to={p.score} ms={1200} /> : 0}</span>
+          </li>
+        );
+      })}
     </ol>
   );
 }

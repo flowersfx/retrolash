@@ -102,8 +102,7 @@ ws.onopen = () => {
     settings: {
       lang: LANG,
       pack: "sailboat",
-      answerSeconds: 20,
-      voteSeconds: 10,
+      // Answer and vote time stay at the default: no limit, phases end when everyone is done.
       discussionSeconds: 15,
       previousItems: ["Fix the flaky tests", "Shorter standups"],
     },

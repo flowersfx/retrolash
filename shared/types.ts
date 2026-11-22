@@ -27,7 +27,9 @@ export interface Settings {
   /** Hide who wrote what, and hide scores. */
   anonymous: boolean;
   rounds: RoundKind[];
+  /** Time to write head-to-head and Last Lash answers. 0 = no limit (ends when everyone is done, or on Next). */
   answerSeconds: number;
+  /** Time to vote. 0 = no limit (ends when everyone has voted, or on Next). */
   voteSeconds: number;
   /** Facilitator-written prompts, mixed into the retro round first. */
   customPrompts: string[];
@@ -80,8 +82,8 @@ export const DEFAULT_LASH_PROMPT: Record<Lang, string> = {
 export const DEFAULT_SETTINGS: Settings = {
   anonymous: false,
   rounds: ["checkin", "warmup", "emoji", "retro", "kudos", "lastlash"],
-  answerSeconds: 90,
-  voteSeconds: 25,
+  answerSeconds: 0,
+  voteSeconds: 0,
   customPrompts: [],
   lashPrompt: DEFAULT_LASH_PROMPT.en,
   lashMaxAnswers: 2,
@@ -332,6 +334,18 @@ export interface HighlightView {
 /** Big-screen timing the server also needs: when the podium reveals its parts, and the highlight cards. */
 export const PODIUM_REVEAL = { intro: 3300, first: 5100 } as const;
 export const HIGHLIGHT_STEP_MS = 3200;
+
+/**
+ * Standings after a round (ms after the screen appears): rows land from last
+ * place up once the voice has spoken (voiceEnd, 0 if silent), then a pause and
+ * the leader(s). `done` is when the screen may move on.
+ */
+export function standingsTiming(n: number, voiceEnd: number) {
+  const start = Math.max(1600, voiceEnd + 400);
+  const step = Math.max(350, Math.min(700, 4200 / Math.max(1, n)));
+  const leader = start + Math.max(0, n - 1) * step + (n > 1 ? 1100 : 0);
+  return { start, step, leader, done: leader + 4500 };
+}
 
 /** Matchup reveal: when each of n vote plates lands, and when the result shows (ms after the screen appears). */
 export function revealTiming(n: number) {

@@ -19,6 +19,7 @@ import {
   MIN_PLAYERS,
   MOODS,
   NO_TALK,
+  standingsTiming,
   promptsEach,
   PACKS,
   PLATE_COLORS,
@@ -856,7 +857,9 @@ export class GameRoom {
           ? FOLLOWUP_ANSWER_MS
           : round.kind === "kudos"
             ? KUDOS_ANSWER_MS
-            : this.state.settings.answerSeconds * 1000;
+            : this.state.settings.answerSeconds > 0
+              ? this.state.settings.answerSeconds * 1000
+              : null;
     const write = this.t().spoken.write;
     if (round.kind === "lastlash")
       return this.spokenPhase("answering", ms, [this.chatter(write.lastlash), this.line(round.lashPrompt ?? "")], 0);
@@ -906,7 +909,8 @@ export class GameRoom {
     if (round.kind === "lastlash") {
       round.lashAnswers = shuffle(round.lashAnswers);
       if (round.lashAnswers.length === 0) return this.nextRound();
-      const ms = Math.max(45, this.state.settings.voteSeconds * 2) * 1000;
+      const v = this.state.settings.voteSeconds;
+      const ms = v > 0 ? Math.max(45, v * 2) * 1000 : null;
       return this.spokenPhase("lashVoting", ms, [this.chatter(say.lashVote)], 0);
     }
     this.fillMissing(round);
@@ -958,7 +962,7 @@ export class GameRoom {
     const m = round.matchups[s.matchupIndex];
     if (read) m.answerAt = read.at;
     else delete m.answerAt;
-    this.spokenPhase("voting", s.settings.voteSeconds * 1000, [...lead, ...(read?.lines ?? [])], 0);
+    this.spokenPhase("voting", s.settings.voteSeconds > 0 ? s.settings.voteSeconds * 1000 : null, [...lead, ...(read?.lines ?? [])], 0);
     // Quick voters don't cut the reading short: the tally waits for the last answer.
     this.readUntil = read ? Date.now() + (read.end + READ_MARGIN_MS) * this.timeScale : 0;
     if (this.expectedIds().length === 0 && this.connectedAudience().length === 0) this.endVoting();
@@ -1110,7 +1114,12 @@ export class GameRoom {
         s.leaderId = top.id;
       }
     }
-    this.spokenPhase("roundResult", ROUND_RESULT_MS, [{ ...this.chatter(this.t().spoken.roundDone), at: 700 }], 0);
+    const lines = [{ ...this.chatter(this.t().spoken.roundDone), at: 700 }];
+    // The standings land one by one after the voice line; stay until the leader has had a moment.
+    const voiceEnd = Math.max(0, ...(this.clips(lines) ?? []).map((c) => (c.at ?? 0) + c.ms));
+    const n = s.players.filter((p) => !p.audience).length;
+    const ms = s.settings.anonymous ? ROUND_RESULT_MS : Math.max(ROUND_RESULT_MS, standingsTiming(n, voiceEnd).done);
+    this.spokenPhase("roundResult", ms, lines, 0);
   }
 
   endLashVoting() {
@@ -1896,13 +1905,15 @@ function sanitizeSettings(s: Settings): Settings {
       .map((p) => clean(p, len))
       .filter(Boolean)
       .slice(0, max);
+  const limit = (n: unknown, lo: number, hi: number, d: number) => (n === 0 ? 0 : clamp(n, lo, hi, d));
   const discussion = clamp(s.discussionSeconds, NO_TALK, 600, DEFAULT_SETTINGS.discussionSeconds);
   const lang = LANGS.includes(s.lang) ? s.lang : DEFAULT_SETTINGS.lang;
   return {
     anonymous: !!s.anonymous,
     rounds: TOGGLEABLE_ROUNDS.filter((r) => (Array.isArray(s.rounds) ? s.rounds : []).includes(r)),
-    answerSeconds: clamp(s.answerSeconds, 20, 300, DEFAULT_SETTINGS.answerSeconds),
-    voteSeconds: clamp(s.voteSeconds, 10, 120, DEFAULT_SETTINGS.voteSeconds),
+    // 0 = no limit; anything else has a sensible floor.
+    answerSeconds: limit(s.answerSeconds, 20, 300, DEFAULT_SETTINGS.answerSeconds),
+    voteSeconds: limit(s.voteSeconds, 10, 120, DEFAULT_SETTINGS.voteSeconds),
     customPrompts: list(s.customPrompts, 30, 120),
     lashPrompt: clean(s.lashPrompt, 120) || DEFAULT_LASH_PROMPT[lang],
     lashMaxAnswers: clamp(s.lashMaxAnswers, 1, 3, DEFAULT_SETTINGS.lashMaxAnswers),
